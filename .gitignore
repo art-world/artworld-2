@@ -1,6 +1,7 @@
 .DS_Store
 *.log
 .env
+.claude/settings.local.json
 
 # Untouched download, kept locally for a possible re-bake. Not used at
 # runtime — assets/models/booth.glb (the optimized pass) is what ships.
