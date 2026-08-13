@@ -1,0 +1,7 @@
+.DS_Store
+*.log
+.env
+
+# Untouched download, kept locally for a possible re-bake. Not used at
+# runtime — assets/models/booth.glb (the optimized pass) is what ships.
+/assets/models/source/
