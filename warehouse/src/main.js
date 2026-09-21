@@ -111,6 +111,11 @@ function enableTilt(){
 // require one. Anything at all counts.
 function start(){
   enableTilt();
+  // Before the early return. A context that failed to resume on the first
+  // gesture used to stay suspended for good, because every later tap hit
+  // the return above it: the first track played silently and only changing
+  // track recovered, since that path resumes on its own.
+  audio.wake();
   if (audio.started) return;
   audio.select(current);
   updateHint();

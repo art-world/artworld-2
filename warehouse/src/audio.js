@@ -73,6 +73,15 @@ export function createAudio(tracks, onChange){
     analyser.connect(ctx.destination);
   }
 
+  // The element is routed through the graph, so a suspended context plays
+  // it silently: currentTime advances, the player looks correct and nothing
+  // comes out. Resuming is cheap and safe to repeat, so every gesture gets
+  // another go at it rather than assuming the first one took.
+  function wake(){
+    if (!ctx) return;
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  }
+
   function select(index, { autoplay = true } = {}){
     const track = tracks[(index + tracks.length) % tracks.length];
     state.index = (index + tracks.length) % tracks.length;
@@ -85,8 +94,13 @@ export function createAudio(tracks, onChange){
     // it. On iOS the user activation does not survive an await, so resuming
     // the context first, as this did, gets the play promise rejected and
     // the very first tap reports itself as paused.
+    // Either side of play(). Before, because the context should be running
+    // by the time audio is routed through it; after, because on iOS the
+    // call that follows play() in the same gesture is the one that tends
+    // to be honoured.
+    wake();
     const started = el.play();
-    if (ctx.state === 'suspended') ctx.resume();
+    wake();
 
     if (started && started.then){
       started.then(() => { state.playing = true; state.refused = false; })
@@ -100,7 +114,7 @@ export function createAudio(tracks, onChange){
 
   function toggle(){
     if (!ctx) { select(Math.max(state.index, 0)); return; }
-    if (el.paused) { el.play(); ctx.resume(); state.playing = true; state.refused = false; }
+    if (el.paused) { wake(); el.play(); wake(); state.playing = true; state.refused = false; }
     else { el.pause(); state.playing = false; }
   }
 
@@ -155,7 +169,10 @@ export function createAudio(tracks, onChange){
     return state;
   }
 
-  return { element: el, state, select, toggle, update, ensureGraph,
+  return { element: el, state, select, toggle, update, ensureGraph, wake,
            get started(){ return ctx !== null; },
-           get refused(){ return state.refused; } };
+           get refused(){ return state.refused; },
+           // Worth exposing: a suspended context is indistinguishable from
+           // working playback from the element alone.
+           get contextState(){ return ctx ? ctx.state : 'none'; } };
 }
