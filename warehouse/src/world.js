@@ -488,10 +488,13 @@ export async function buildWorld(renderer, config, onProgress){
 
   function update(time, audio, config2, pointer){
     uniforms.uTime.value = time;
-    uniforms.uLevel.value = audio.level;
-    uniforms.uBass.value = audio.bass;
-    uniforms.uTreble.value = audio.treble;
-    uniforms.uHit.value = audio.hit;
+    // Scaled on the way in, so the wall barely moves while the lights
+    // below still get the full signal.
+    const k = config2.projection.shaderReact;
+    uniforms.uLevel.value = audio.level * k;
+    uniforms.uBass.value = audio.bass * k;
+    uniforms.uTreble.value = audio.treble * k;
+    uniforms.uHit.value = audio.hit * k;
     if (pointer){
       uniforms.uPointer.value.set(pointer.x, -pointer.y);
       uniforms.uPointerVel.value = pointer.vel;

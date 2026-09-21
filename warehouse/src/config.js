@@ -40,11 +40,17 @@ export const config = {
     decay: 1.2,
     // How much the audio pushes the light. Each light takes a different
     // band, so the room moves unevenly rather than pumping as one block.
-    reactivity: 0.95,
-    // Extra thrown on an onset. The floor is what the room should mostly
-    // look like, so this is kept to roughly half what it takes to reach the
-    // ceiling: transients lift it without washing the room out.
-    flash: 0.85,
+    // How far the audio is allowed to move the wall itself. Low on
+    // purpose: the image with nothing playing is the reference, and the
+    // music should be driving the room rather than redrawing the shader.
+    shaderReact: 0.4,
+    // Sustained brightness from the bands. Kept well down, because this is
+    // the level the room sits at most of the time.
+    reactivity: 0.5,
+    // Extra thrown on an onset. Most of the brightness now arrives this
+    // way: the room sits dark and the transients spike it, which reads as
+    // flashes rather than as a wash that happens to move.
+    flash: 2.4,
   },
 
   // Camera offset the visitor drives with the pointer. It is added on top
@@ -102,15 +108,12 @@ export const config = {
     depth: 3.2,       // how far back the furthest one stands
     // Bigger than life on the wall. The plane is sixteen metres across, so
     // even at this they are well under human scale against the room.
-    scale: 1.35,
+    scale: 1.75,
     // How each figure is treated in the shader. All three are hollow: the
     // field runs through every one of them and none is filled in. 0 reads
     // as polished metal, 0.5 as an open shell, 1 as etched contour. Slots
     // take these in turn.
-    // 0.3 is the clear one: same shell treatment, but barely eroded and
-    // carrying its own shading, so it resolves as a body. Three slots in
-    // every ten get it.
-    treatments: [0.1, 0.5, 0.3, 0.9, 0.3, 0.1, 0.5, 0.9, 0.3, 0.5],
+    treatments: [0.1, 0.5, 0.9, 0.5, 0.1, 0.9, 0.5],
     drift: 0.15,      // units per second across frame
     spin: 0.7,        // radians per second, each one turning on the spot
     tumble: 0.22,     // off-axis lean, so they are not all upright

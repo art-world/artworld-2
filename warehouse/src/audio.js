@@ -134,7 +134,9 @@ export function createAudio(tracks, onChange){
     fluxAverage += (flux - fluxAverage) * 0.06;
     // Only the part that beats the running average counts as an onset.
     const onset = Math.min(1, Math.max(0, flux - fluxAverage * 1.35) * 9);
-    state.hit = Math.max(onset, state.hit * 0.74);
+    // Short. A slow release turns every transient into a swell, and the
+    // room ends up sustained rather than flashing.
+    state.hit = Math.max(onset, state.hit * 0.58);
     const lo = band(1, bassEnd);
     const hi = band(trebleStart, bins.length - 1);
     const all = band(1, bins.length - 1);

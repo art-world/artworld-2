@@ -148,9 +148,12 @@ float withDancers(float v, vec2 p){
   float e1 = turb(p * 1.3 + t * 0.12);
   float e2 = turb(p * 4.0 - t * 0.26);
 
+  // Light. Dragging the sample point hard through the flow smears the
+  // figures around the frame, which is movement rather than texture, and
+  // it is the thing that stopped them holding still enough to read.
   vec2 duv = vUv
-           + curl(p * 0.9, t * 0.07) * (0.028 + uBass * 0.075)
-           + (vec2(e1, e2) - 0.4) * (0.075 + uTreble * 0.11);
+           + curl(p * 0.9, t * 0.07) * (0.009 + uBass * 0.02)
+           + (vec2(e1, e2) - 0.4) * (0.02 + uTreble * 0.03);
 
   // Blocky tearing: quantised, so it reads as signal rather than as noise.
   vec2 cell = floor(vUv * vec2(42.0, 15.0));
@@ -171,27 +174,14 @@ float withDancers(float v, vec2 p){
   // partly there. Built from the two turbulence samples already taken
   // above rather than new ones, because this runs for most of the screen.
   float brk = smoothstep(0.14, 0.5, e2 * 0.85 + e1 * 0.3);
-  float rimBroken = rim * (0.26 + brk * 1.35);
-
-  // A few keep a clear edge. If every figure is fragments there is nothing
-  // for the eye to resolve against, and the whole wall reads as texture.
-  float rimClear = rim * (0.88 + brk * 0.4);
-
-  // Treatment 0.3 is the clear one, in a narrow band so it never bleeds
-  // into the neighbouring treatments.
-  float wClear = 1.0 - smoothstep(0.0, 0.1, abs(treat - 0.3));
-  rim = mix(rimBroken, rimClear, wClear);
+  rim *= 0.26 + brk * 1.35;
 
   // Body reads off the broken rim too, so the figures come apart in
   // sections rather than only losing their outline.
   float body = face * 0.5 + rim * 0.8;
 
-  // Erosion is what actually reads as blur; the warp only displaces. So
-  // the clear ones are barely eroded at all, which is what holds them
-  // together as bodies instead of as drifting fragments.
   float er = e1 * 0.62 + e2 * 0.45;
-  float sil = cov * mix(smoothstep(0.06, 0.48, er),
-                        smoothstep(-0.12, 0.28, er), wClear);
+  float sil = cov * smoothstep(0.06, 0.48, er);
 
   // All three are hollow. None of them fills the body in: the field runs
   // straight through every one, and what differs is only how the surface
@@ -209,11 +199,6 @@ float withDancers(float v, vec2 p){
   // hard. A faint edge is enough on a bright field and vanishes entirely on
   // a dark one, and half these shaders are dark.
   float mShell = v * (0.92 + body * 0.35) + rim * (1.0 + uHit * 0.45) + face * 0.16;
-
-  // The clear variant of the same treatment: still hollow, but the body's
-  // own shading comes through so it resolves as a figure and not an outline.
-  float mShellClear = v * (0.8 + body * 0.5) + rim * (1.05 + uHit * 0.4) + face * 0.44;
-  mShell = mix(mShell, mShellClear, wClear);
 
   // Etched: contour lines running across the form, interior left open.
   float et = fract(face * 7.0 - rim * 2.0 + t * 0.14);

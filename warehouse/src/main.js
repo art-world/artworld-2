@@ -48,6 +48,10 @@ const ui = createUI({
   onPrev: () => go(current - 1),
   onNext: () => go(current + 1),
   onToggle: () => { audio.toggle(); updateHint(); },
+  onSeek: (fraction) => {
+    const el = audio.element;
+    if (el.duration) el.currentTime = fraction * el.duration;
+  },
 });
 
 function updateHint(){
@@ -145,6 +149,13 @@ function frame(){
   const time = clock.getElapsedTime();
   const local = performance.now() / 1000 - trackStart;
   const levels = audio.update();
+
+  // Guarded because there is no build step and so no content hashing: a
+  // returning visitor can hold a cached ui.js against a fresh main.js, and
+  // an unguarded call there throws on the first frame and kills the render
+  // loop for good. Losing the play bar is a far better failure.
+  const el = audio.element;
+  if (ui.setPlayed) ui.setPlayed(el.duration ? el.currentTime / el.duration : 0);
 
   // Offscreen first: the projection samples the result, so it has to exist
   // before the room is drawn.
