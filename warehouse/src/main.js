@@ -17,10 +17,28 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.05, 400);
 const lookAt = new THREE.Vector3();
+const back = new THREE.Vector3();   // scratch, so the frame loop allocates nothing
 
-const world = await buildWorld(renderer, config);
+// The ticker counts the models and their buffers, which is the bulk of the
+// wait on a cold load. It is declared before the world because the world is
+// what it is counting.
+const loadingEl = document.getElementById('loading');
+const countEl = loadingEl.querySelector('.count');
+const barEl = loadingEl.querySelector('.bar i');
+let shown = 0;
+
+function setProgress(fraction){
+  // Never counts backwards: the manager reports per file, and a later file
+  // finishing first would otherwise make the number drop.
+  shown = Math.max(shown, Math.min(1, fraction));
+  const pct = Math.round(shown * 100);
+  countEl.textContent = String(pct).padStart(2, '0');
+  barEl.style.width = pct + '%';
+}
+
+const world = await buildWorld(renderer, config, setProgress);
 const grade = createGrade(renderer, config.grade);
-const audio = createAudio(config.tracks);
+const audio = createAudio(config.tracks, () => updateHint());
 
 let current = 0;
 let trackStart = performance.now() / 1000;
@@ -33,10 +51,17 @@ const ui = createUI({
 });
 
 function updateHint(){
-  if (!audio.started) ui.setHint('press any key or click to play');
+  if (!audio.started) ui.setHint('tap or press any key to play');
+  // Refused is not paused. A browser turning playback down reads as a
+  // stopped player otherwise, which is what the first tap on a phone used
+  // to report back.
+  else if (audio.refused) ui.setHint('tap to play');
   else if (audio.element.paused) ui.setHint('paused');
   else ui.setHint('');
 }
+
+let switchAt = -99;
+let switchDir = 1;
 
 function go(next){
   const n = config.tracks.length;
@@ -44,15 +69,44 @@ function go(next){
   const track = config.tracks[current];
   world.setShader(track.shader);
   trackStart = performance.now() / 1000;
+  switchAt = trackStart;
+  switchDir = -switchDir;
   ui.setTrack(current, track);
   // Only chase playback once the visitor has started it.
   audio.select(current, { autoplay: audio.started });
   updateHint();
 }
 
+// Phone tilt. Reading orientation needs permission on iOS and it is only
+// grantable from inside a gesture, which is why it is asked for here rather
+// than at load.
+const tilt = { x: 0, y: 0, tx: 0, ty: 0 };
+let tiltAsked = false;
+
+function onOrientation(e){
+  if (e.gamma === null || e.beta === null) return;
+  tilt.tx = Math.max(-1, Math.min(1, e.gamma / 40));
+  tilt.ty = Math.max(-1, Math.min(1, (e.beta - 40) / 40));
+}
+
+function enableTilt(){
+  if (tiltAsked) return;
+  tiltAsked = true;
+  const D = window.DeviceOrientationEvent;
+  if (!D) return;
+  if (typeof D.requestPermission === 'function'){
+    D.requestPermission()
+      .then((r) => { if (r === 'granted') window.addEventListener('deviceorientation', onOrientation); })
+      .catch(() => {});
+  } else {
+    window.addEventListener('deviceorientation', onOrientation);
+  }
+}
+
 // The room runs from load. Sound waits for a gesture, because browsers
 // require one. Anything at all counts.
 function start(){
+  enableTilt();
   if (audio.started) return;
   audio.select(current);
   updateHint();
@@ -109,21 +163,42 @@ function frame(){
   const moved = Math.hypot(pointer.x - px, pointer.y - py);
   pointer.vel = Math.max(Math.min(1, moved * 14), pointer.vel * 0.93);
 
+  const tl = config.tilt;
+  tilt.x += (tilt.tx - tilt.x) * tl.ease;
+  tilt.y += (tilt.ty - tilt.y) * tl.ease;
+
   camera.position.set(
-    shot.pos[0] + pointer.x * m.strength,
-    Math.max(0.3, shot.pos[1] - pointer.y * m.strength * 0.45),
+    shot.pos[0] + pointer.x * m.strength + tilt.x * tl.strength,
+    Math.max(0.3, shot.pos[1] - pointer.y * m.strength * 0.45 - tilt.y * tl.strength * 0.4),
     shot.pos[2]
   );
   // The aim point swings against the camera, which turns a slide into a
   // parallax rather than a pan.
   lookAt.set(
-    shot.look[0] - pointer.x * m.look,
-    shot.look[1] + pointer.y * m.look * 0.5,
+    shot.look[0] - pointer.x * m.look - tilt.x * tl.strength * 0.35,
+    shot.look[1] + pointer.y * m.look * 0.5 + tilt.y * tl.strength * 0.3,
     shot.look[2]
   );
+
+  // The whip on a track change: thrown back along the view, opened up and
+  // rolled, settling into the new path inside about a second. Alternating
+  // the roll each time stops consecutive switches feeling identical.
+  const sw = config.switchShot;
+  const kick = Math.exp(-(performance.now() / 1000 - switchAt) * sw.decay);
+  if (kick > 0.003){
+    back.copy(camera.position).sub(lookAt).normalize();
+    camera.position.addScaledVector(back, sw.pull * kick);
+  }
+
   camera.lookAt(lookAt);
-  if (Math.abs(camera.fov - shot.fov) > 0.01){
-    camera.fov = shot.fov;
+
+  // Horizon follows the phone, and takes the switch roll with it.
+  const roll = tilt.x * tl.roll + (kick > 0.003 ? sw.roll * kick * switchDir : 0);
+  if (Math.abs(roll) > 0.0005) camera.rotateZ(roll);
+
+  const fov = shot.fov + sw.fov * kick;
+  if (Math.abs(camera.fov - fov) > 0.01){
+    camera.fov = fov;
     camera.updateProjectionMatrix();
   }
 
@@ -140,4 +215,6 @@ world.setShader(config.tracks[current].shader);
 updateHint();
 ui.reveal();
 document.body.classList.add('loaded');
+setProgress(1);
+loadingEl.classList.add('done');
 frame();

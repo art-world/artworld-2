@@ -328,8 +328,16 @@ function createDancers(renderer, gltfs, config, aspect){
   return { texture: target.texture, render };
 }
 
-export async function buildWorld(renderer, config){
-  const loader = new GLTFLoader();
+export async function buildWorld(renderer, config, onProgress){
+  // A manager so the loading ticker has something to count. It sees the
+  // glTF files and every texture and buffer they pull in, which is the
+  // bulk of the wait; the audio streams later and is not counted.
+  const manager = new THREE.LoadingManager();
+  if (onProgress){
+    manager.onProgress = (url, loaded, total) => onProgress(loaded / Math.max(total, 1));
+    manager.onLoad = () => onProgress(1);
+  }
+  const loader = new GLTFLoader(manager);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
   scene.fog = new THREE.FogExp2(0x000000, 0.0135);

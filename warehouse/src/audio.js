@@ -4,7 +4,7 @@
 const BASS_HZ = 200;
 const TREBLE_HZ = 4000;
 
-export function createAudio(tracks){
+export function createAudio(tracks, onChange){
   const el = document.createElement('audio');
   el.preload = 'metadata';
   el.crossOrigin = 'anonymous';
@@ -22,7 +22,8 @@ export function createAudio(tracks){
   // `hit` is onset, not loudness: it spikes on a transient and falls away
   // fast. Loudness alone cannot drive a flash, because a loud sustained
   // passage would just hold the lights up.
-  const state = { level: 0, bass: 0, treble: 0, hit: 0, index: -1, playing: false };
+  const state = { level: 0, bass: 0, treble: 0, hit: 0, index: -1,
+                  playing: false, refused: false };
   let previous = null;
   let fluxAverage = 0;
   // Per-band running range. Normalising against the peak alone is not
@@ -72,26 +73,34 @@ export function createAudio(tracks){
     analyser.connect(ctx.destination);
   }
 
-  async function select(index, { autoplay = true } = {}){
+  function select(index, { autoplay = true } = {}){
     const track = tracks[(index + tracks.length) % tracks.length];
     state.index = (index + tracks.length) % tracks.length;
     el.src = track.src;
     el.load();
     if (!autoplay) return;
     ensureGraph();
-    if (ctx.state === 'suspended') await ctx.resume();
-    try {
-      await el.play();
+
+    // play() has to be called in the same turn as the gesture that caused
+    // it. On iOS the user activation does not survive an await, so resuming
+    // the context first, as this did, gets the play promise rejected and
+    // the very first tap reports itself as paused.
+    const started = el.play();
+    if (ctx.state === 'suspended') ctx.resume();
+
+    if (started && started.then){
+      started.then(() => { state.playing = true; state.refused = false; })
+             .catch(() => { state.playing = false; state.refused = true; })
+             .then(() => { if (onChange) onChange(); });
+    } else {
       state.playing = true;
-    } catch (err) {
-      // Playback was refused, almost always because there was no gesture yet.
-      state.playing = false;
+      state.refused = false;
     }
   }
 
   function toggle(){
     if (!ctx) { select(Math.max(state.index, 0)); return; }
-    if (el.paused) { ctx.resume(); el.play(); state.playing = true; }
+    if (el.paused) { el.play(); ctx.resume(); state.playing = true; state.refused = false; }
     else { el.pause(); state.playing = false; }
   }
 
@@ -145,5 +154,6 @@ export function createAudio(tracks){
   }
 
   return { element: el, state, select, toggle, update, ensureGraph,
-           get started(){ return ctx !== null; } };
+           get started(){ return ctx !== null; },
+           get refused(){ return state.refused; } };
 }

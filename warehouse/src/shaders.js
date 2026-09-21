@@ -186,8 +186,12 @@ float withDancers(float v, vec2 p){
   // sections rather than only losing their outline.
   float body = face * 0.5 + rim * 0.8;
 
+  // Erosion is what actually reads as blur; the warp only displaces. So
+  // the clear ones are barely eroded at all, which is what holds them
+  // together as bodies instead of as drifting fragments.
   float er = e1 * 0.62 + e2 * 0.45;
-  float sil = cov * smoothstep(0.06, 0.48, er);
+  float sil = cov * mix(smoothstep(0.06, 0.48, er),
+                        smoothstep(-0.12, 0.28, er), wClear);
 
   // All three are hollow. None of them fills the body in: the field runs
   // straight through every one, and what differs is only how the surface
@@ -205,6 +209,11 @@ float withDancers(float v, vec2 p){
   // hard. A faint edge is enough on a bright field and vanishes entirely on
   // a dark one, and half these shaders are dark.
   float mShell = v * (0.92 + body * 0.35) + rim * (1.0 + uHit * 0.45) + face * 0.16;
+
+  // The clear variant of the same treatment: still hollow, but the body's
+  // own shading comes through so it resolves as a figure and not an outline.
+  float mShellClear = v * (0.8 + body * 0.5) + rim * (1.05 + uHit * 0.4) + face * 0.44;
+  mShell = mix(mShell, mShellClear, wClear);
 
   // Etched: contour lines running across the form, interior left open.
   float et = fract(face * 7.0 - rim * 2.0 + t * 0.14);
@@ -229,7 +238,10 @@ vec2 pointerPush(vec2 p){
   // Tight falloff: a small pointed disturbance under the cursor. At a wide
   // radius this stops being a disturbance and just slides the whole plane
   // around, which reads as the image coming loose rather than responding.
-  float k = (0.09 + uPointerVel * 0.9) * exp(-r2 * 16.0);
+  // Stronger and a little wider than it reads on a desktop: a fingertip
+  // covers more of a phone screen than a cursor does, and the disturbance
+  // has to be findable under it.
+  float k = (0.16 + uPointerVel * 1.9) * exp(-r2 * 12.0);
   return d * k;
 }
 

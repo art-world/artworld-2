@@ -51,9 +51,28 @@ export const config = {
   // of the named path, never inside it, so the paths stay deterministic and
   // replay identically with no pointer present.
   mouse: {
-    strength: 2.2,   // metres of camera travel at full deflection
-    look: 1.1,       // metres the aim point shifts against it
-    ease: 0.04,      // how fast it catches up, per frame
+    strength: 2.6,   // metres of camera travel at full deflection
+    look: 1.3,       // metres the aim point shifts against it
+    // Faster than it reads on a desktop. A drag on a touchscreen has to
+    // answer under the finger or it feels broken rather than smooth.
+    ease: 0.1,
+  },
+
+  // A whip on the camera when the track changes, so a switch lands as a cut
+  // rather than a dissolve. Decays into the new path within a second or so.
+  switchShot: {
+    pull: 11,        // metres thrown back at the moment of the cut
+    fov: 30,         // degrees opened on top of it
+    roll: 0.6,       // radians of horizon tilt, alternating each switch
+    decay: 2.4,      // how fast it settles, per second
+  },
+
+  // Phone tilt. iOS will only grant this from inside a gesture, so it is
+  // asked for on the first tap, alongside starting the audio.
+  tilt: {
+    strength: 3.0,   // metres of camera travel at full tilt
+    roll: 0.3,       // radians the horizon follows the phone
+    ease: 0.07,
   },
 
   // Figures rendered offscreen with a camera of their own, then handed to
@@ -76,7 +95,7 @@ export const config = {
       { model: 'assets/models/samba/scene.gltf',    deform: false, weight: 5 },
       { model: 'assets/models/twerk/scene.gltf',    deform: false, weight: 4 },
     ],
-    count: 20,
+    count: 22,
     // Wider than the camera sees at once, on purpose: figures should be
     // entering and leaving frame rather than all standing in the middle.
     spread: 4.8,      // half-width of the ground they stand across
@@ -88,9 +107,10 @@ export const config = {
     // field runs through every one of them and none is filled in. 0 reads
     // as polished metal, 0.5 as an open shell, 1 as etched contour. Slots
     // take these in turn.
-    // 0.3 is the clear-edged one: same shell treatment, but its outline is
-    // left mostly intact. Four slots in twenty get it.
-    treatments: [0.1, 0.5, 0.9, 0.3, 0.5, 0.1, 0.9, 0.5, 0.3, 0.9],
+    // 0.3 is the clear one: same shell treatment, but barely eroded and
+    // carrying its own shading, so it resolves as a body. Three slots in
+    // every ten get it.
+    treatments: [0.1, 0.5, 0.3, 0.9, 0.3, 0.1, 0.5, 0.9, 0.3, 0.5],
     drift: 0.15,      // units per second across frame
     spin: 0.7,        // radians per second, each one turning on the spot
     tumble: 0.22,     // off-axis lean, so they are not all upright
