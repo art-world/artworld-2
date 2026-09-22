@@ -60,6 +60,10 @@ function updateHint(){
   // stopped player otherwise, which is what the first tap on a phone used
   // to report back.
   else if (audio.refused) ui.setHint('tap to play');
+  // A context that has not started plays the element silently. Say so,
+  // rather than showing a player that looks like it is working while
+  // nothing comes out of the phone.
+  else if (audio.contextState !== 'running') ui.setHint('tap again for sound');
   else if (audio.element.paused) ui.setHint('paused');
   else ui.setHint('');
 }
@@ -120,8 +124,12 @@ function start(){
   audio.select(current);
   updateHint();
 }
+// Several, because iOS does not treat them all as activation and the one
+// that counts varies by version. start() is cheap and idempotent.
 window.addEventListener('pointerdown', start);
 window.addEventListener('keydown', start);
+window.addEventListener('touchend', start);
+window.addEventListener('click', start);
 
 audio.element.addEventListener('ended', () => go(current + 1));
 audio.element.addEventListener('play', updateHint);
@@ -149,6 +157,7 @@ window.addEventListener('pointermove', (e) => {
 window.addEventListener('pointerleave', () => { pointer.tx = 0; pointer.ty = 0; });
 
 const clock = new THREE.Clock();
+let lastContext = '';
 
 function frame(){
   const time = clock.getElapsedTime();
@@ -159,6 +168,13 @@ function frame(){
   // returning visitor can hold a cached ui.js against a fresh main.js, and
   // an unguarded call there throws on the first frame and kills the render
   // loop for good. Losing the play bar is a far better failure.
+  // The context can start long after the gesture that asked it to, and
+  // nothing fires when it does, so the hint is refreshed on the change.
+  if (audio.contextState !== lastContext){
+    lastContext = audio.contextState;
+    updateHint();
+  }
+
   const el = audio.element;
   if (ui.setPlayed) ui.setPlayed(el.duration ? el.currentTime / el.duration : 0);
 

@@ -57,6 +57,13 @@ export function createAudio(tracks, onChange){
   // source can only be created once per element.
   function ensureGraph(){
     if (ctx) return;
+    // Without this the ring/silent switch mutes Web Audio outright on
+    // iOS, which looks exactly like playback that is not working. Newer
+    // Safari only; harmless everywhere else.
+    try {
+      if (navigator.audioSession) navigator.audioSession.type = 'playback';
+    } catch (err) { /* not supported, not fatal */ }
+
     const AC = window.AudioContext || window.webkitAudioContext;
     ctx = new AC();
     analyser = ctx.createAnalyser();
@@ -71,15 +78,39 @@ export function createAudio(tracks, onChange){
 
     ctx.createMediaElementSource(el).connect(analyser);
     analyser.connect(ctx.destination);
+
+    // Straight away, while the gesture that built the graph is still live.
+    unlock();
+    ctx.resume().catch(() => {});
   }
 
   // The element is routed through the graph, so a suspended context plays
   // it silently: currentTime advances, the player looks correct and nothing
   // comes out. Resuming is cheap and safe to repeat, so every gesture gets
   // another go at it rather than assuming the first one took.
+  // Safari will not start a context just because resume() was called. It
+  // wants something actually played through it inside a gesture first, and
+  // a single silent sample counts. This is the difference between a context
+  // that reports itself resumed and one that is genuinely running, and it
+  // is why the first track came out silent until a few more taps happened
+  // to land while the graph was in the right state.
+  function unlock(){
+    if (!ctx) return;
+    try {
+      const buffer = ctx.createBuffer(1, 1, 22050);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(0);
+    } catch (err) { /* nothing to recover from */ }
+  }
+
   function wake(){
     if (!ctx) return;
-    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    if (ctx.state !== 'running'){
+      unlock();
+      ctx.resume().catch(() => {});
+    }
   }
 
   function select(index, { autoplay = true } = {}){
@@ -169,7 +200,7 @@ export function createAudio(tracks, onChange){
     return state;
   }
 
-  return { element: el, state, select, toggle, update, ensureGraph, wake,
+  return { element: el, state, select, toggle, update, ensureGraph, wake, unlock,
            get started(){ return ctx !== null; },
            get refused(){ return state.refused; },
            // Worth exposing: a suspended context is indistinguishable from
