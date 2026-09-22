@@ -41,6 +41,14 @@ export const config = {
     spin: 0.6,       // radians per second on the spot
     tumble: 0.22,
     treatments: [0.1, 0.5, 0.9, 0.5, 0.1, 0.9, 0.5],
+    // How far each figure comes apart. Slabs of the body are displaced in
+    // space and sample the field from elsewhere, both stepped in time.
+    glitch: 0.42,
+    // A couple of enormous ones, much further out and much more broken, so
+    // they read as structure you are inside rather than as more figures.
+    giants: 2,
+    giantScale: 4.2,
+    giantGlitch: 1.35,
   },
 
   view: {
@@ -55,7 +63,20 @@ export const config = {
     idle: 2.5,       // seconds before the drift takes back over
     fov: 78,
     // The viewer pushes the field where they look.
-    reach: 0.55,
+    reach: 1.1,
+    // The field breaks into slabs. A floor that is always there, plus what
+    // the music and the viewer's own movement add on top.
+    tear: 0.16,
+    tearHit: 0.5,
+    tearReach: 0.45,
+
+    // The camera travels as well as turning, so the figures move past each
+    // other instead of only rotating on the spot.
+    pan: {
+      rate: 0.055,
+      radius: 6.5,
+      rise: 2.0,
+    },
   },
 
   grade: {

@@ -37,6 +37,17 @@ function normalise(root){
 const FIGURE_FRAG = /* glsl */ `
   vec3 dir = normalize(vWorld - cameraPosition);
   vec2 p = mapDir(dir) + gazePush(dir);
+
+  // Block tearing. The body is cut into horizontal slabs and each one
+  // samples the field from somewhere else, stepped in time rather than
+  // smooth so it reads as signal breaking up and not as wobble.
+  float slab = floor(vWorld.y * (4.0 + uGlitch * 13.0) + uTime * 0.6);
+  float gh = hash11(slab * 3.7 + floor(uTime * 7.0) * 1.3);
+  p += vec2(gh - 0.5, fract(gh * 17.3) - 0.5) * (0.2 + uGlitch * 1.5);
+
+  // Whole slabs drop out.
+  if (gh < uGlitch * 0.16) discard;
+
   float v = clamp(field(p), 0.0, 1.0);
 
   float face = clamp(normal.z, 0.0, 1.0);
@@ -47,7 +58,7 @@ const FIGURE_FRAG = /* glsl */ `
   float e1 = turb(p * 1.3 + uTime * 0.12);
   float e2 = turb(p * 4.0 - uTime * 0.26);
   float er = e1 * 0.62 + e2 * 0.45;
-  float keep = smoothstep(0.02, 0.4, er);
+  float keep = smoothstep(0.02 + uGlitch * 0.16, 0.4 + uGlitch * 0.1, er);
   if (keep < 0.08) discard;
 
   float brk = smoothstep(0.14, 0.5, e2 * 0.85 + e1 * 0.3);
@@ -81,14 +92,26 @@ function figureMaterial(shaderName, shared){
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, shared);
 
-    shader.vertexShader = 'varying vec3 vWorld;\n' + shader.vertexShader.replace(
-      '#include <project_vertex>',
-      // After skinning, so a posed limb is shaded where it actually is.
-      'vWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#include <project_vertex>'
-    );
+    shader.vertexShader =
+      'varying vec3 vWorld;\nuniform float uTime, uGlitch;\n' +
+      'float vhash(float n){ return fract(sin(n) * 43758.5453123); }\n' +
+      shader.vertexShader.replace(
+        '#include <project_vertex>',
+        // After skinning, so a posed limb is shaded and sliced where it
+        // actually is. Slicing the geometry rather than only the shading
+        // is what makes the break look like the body came apart.
+        `{
+           float sl = floor(transformed.y * (6.0 + uGlitch * 10.0) + uTime * 0.7);
+           float g = vhash(sl * 7.1 + floor(uTime * 5.0) * 2.3);
+           transformed.x += (g - 0.5) * uGlitch * 0.5;
+           transformed.z += (fract(g * 31.7) - 0.5) * uGlitch * 0.36;
+         }
+         vWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+         #include <project_vertex>`
+      );
 
     shader.fragmentShader =
-      'varying vec3 vWorld;\nuniform float uTreat;\n' +
+      'varying vec3 vWorld;\nuniform float uTreat, uGlitch;\n' +
       UNIFORMS + HELPERS + fieldBody(shaderName) +
       shader.fragmentShader.replace(
         'gl_FragColor = vec4( packNormalToRGB( normal ), diffuseColor.a );',
@@ -121,10 +144,13 @@ export async function buildWorld(renderer, config, onProgress){
     uGain:   { value: config.field.gain },
     uLook:   { value: new THREE.Vector3(0, 0, -1) },
     uReach:  { value: 0 },
+    uTear:   { value: 0 },
     // Set per figure, between draws. It has to exist before the materials
     // compile: onBeforeCompile copies this object at compile time and a key
     // added afterwards is never bound to anything.
     uTreat:  { value: 0.5 },
+    // Per figure, set between draws like uTreat. The giants run far higher.
+    uGlitch: { value: 0.3 },
   };
 
   // --- the field that closes around the viewer -------------------------
@@ -182,13 +208,17 @@ export async function buildWorld(renderer, config, onProgress){
   for (let i = 0; i < cfg.count; i++){
     const a = Math.abs(Math.sin(i * 127.1 + 4.7) * 43758.5453) % 1;
     const b = Math.abs(Math.sin(i * 311.7 + 9.2) * 24634.6345) % 1;
+    // A couple of them are enormous and come apart badly. They read as
+    // structure you are standing inside rather than as another figure.
+    const giant = i < cfg.giants;
     slots.push({
       source: pool[(i * 5 + Math.floor(a * 11)) % pool.length],
       treat: cfg.treatments[i % cfg.treatments.length],
+      glitch: giant ? cfg.giantGlitch : cfg.glitch * (0.6 + a * 0.8),
       angle: (i / cfg.count) * Math.PI * 2 + a * 0.6,
-      radius: cfg.near + a * (cfg.far - cfg.near),
-      y: (b - 0.55) * cfg.rise * 2,
-      scale: cfg.height * (0.8 + b * 0.5),
+      radius: giant ? cfg.far * (1.1 + a * 0.5) : cfg.near + a * (cfg.far - cfg.near),
+      y: giant ? (b - 0.4) * cfg.rise : (b - 0.55) * cfg.rise * 2,
+      scale: cfg.height * (giant ? cfg.giantScale * (0.8 + b * 0.5) : 0.8 + b * 0.5),
       spin: (a - 0.5) * 2 * cfg.spin,
       orbit: cfg.orbit * (0.5 + b) * (i % 2 ? 1 : -1),
       phase: a * 6.283 + i * 1.7,
@@ -232,6 +262,7 @@ export async function buildWorld(renderer, config, onProgress){
       );
       src.holder.scale.setScalar(slot.scale);
       shared.uTreat.value = slot.treat;
+      shared.uGlitch.value = slot.glitch;
       renderer.render(src.sub, camera);
     }
 
@@ -246,7 +277,10 @@ export async function buildWorld(renderer, config, onProgress){
     shared.uTreble.value = audio.treble * k;
     shared.uHit.value = audio.hit * k;
     if (look) shared.uLook.value.copy(look);
-    shared.uReach.value = pointer ? pointer.vel * config.view.reach : 0;
+    const moved = pointer ? pointer.vel : 0;
+    const v = config.view;
+    shared.uReach.value = moved * v.reach;
+    shared.uTear.value = v.tear + audio.hit * v.tearHit + moved * v.tearReach;
   }
 
   return { scene, sky, setShader, update, renderFigures, shared };

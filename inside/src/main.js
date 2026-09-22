@@ -188,8 +188,15 @@ function frame(){
   look.pitch = Math.max(-v.pitchLimit, Math.min(v.pitchLimit, look.pitch));
   camera.rotation.set(look.pitch, look.yaw, 0, 'YXZ');
 
-  // A slow bodily drift, so the figures shift against each other.
-  camera.position.set(Math.sin(time * 0.05) * 1.3, Math.sin(time * 0.037) * 0.6, Math.cos(time * 0.043) * 1.3);
+  // Automatic pan. Two rates on each axis so the path never repeats and
+  // never sits still, and wide enough that figures pass each other rather
+  // than only turning on the spot.
+  const pan = v.pan;
+  camera.position.set(
+    Math.sin(time * pan.rate) * pan.radius + Math.sin(time * pan.rate * 2.7 + 1.3) * pan.radius * 0.28,
+    Math.sin(time * pan.rate * 0.71 + 1.1) * pan.rise,
+    Math.cos(time * pan.rate * 0.83) * pan.radius + Math.cos(time * pan.rate * 1.9) * pan.radius * 0.22
+  );
   world.sky.position.copy(camera.position);
 
   camera.getWorldDirection(forward);
