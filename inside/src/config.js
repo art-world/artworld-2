@@ -4,9 +4,9 @@
 export const config = {
   // Track count is derived from this array. Never hardcode a count.
   tracks: [
-    { title: '23', src: '../warehouse/assets/audio/23.m4a', shader: 'tunnel'   },
+    { title: '23', src: '../warehouse/assets/audio/23.m4a', shader: 'warp'     },
     { title: '27', src: '../warehouse/assets/audio/27.m4a', shader: 'fracture' },
-    { title: '38', src: '../warehouse/assets/audio/38.m4a', shader: 'warp'     },
+    { title: '38', src: '../warehouse/assets/audio/38.m4a', shader: 'tunnel'   },
     { title: '40', src: '../warehouse/assets/audio/40.m4a', shader: 'bodies'   },
     { title: '41', src: '../warehouse/assets/audio/41.m4a', shader: 'strata'   },
     { title: '42', src: '../warehouse/assets/audio/42.m4a', shader: 'swarm'    },
@@ -43,7 +43,12 @@ export const config = {
     treatments: [0.1, 0.5, 0.9, 0.5, 0.1, 0.9, 0.5],
     // How far each figure moves with the flow. The geometry bends on a
     // wave travelling up the body and its shading drifts with the field.
-    flux: 0.5,
+    flux: 0.22,
+    // Some of them judder as well, in steps rather than smoothly, the way
+    // they did in the warehouse. Every nth slot gets it, so it is a few
+    // figures coming apart rather than all of them.
+    shake: 0.75,
+    shakeEvery: 3,
     // A couple of enormous ones, much further out and moving much more, so
     // they read as structure you are inside rather than as more figures.
     giants: 2,
@@ -64,11 +69,12 @@ export const config = {
     fov: 78,
     // The viewer pushes the field where they look.
     reach: 1.1,
-    // How hard the field itself moves. A floor that is always there, plus
-    // what the music and the viewer's own movement add on top.
-    flow: 0.5,
-    flowHit: 0.6,
-    flowReach: 0.7,
+    // How hard the field itself moves. Low: the field reads better close
+    // to its own shape, and pushing it far turns the fields into something
+    // else rather than animating them.
+    flow: 0.12,
+    flowHit: 0.22,
+    flowReach: 0.4,
 
     // The camera travels as well as turning, so the figures move past each
     // other instead of only rotating on the spot.

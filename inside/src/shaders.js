@@ -115,7 +115,7 @@ vec2 mapDir(vec3 d){
 vec2 gazePush(vec3 d){
   float towards = max(dot(normalize(d), normalize(uLook)), 0.0);
   float k = pow(towards, 18.0) * uReach;
-  return vec2(d.z, d.x) * k * 1.1;
+  return vec2(d.z, d.x) * k * 1.1;   // continuous in d, no angle anywhere
 }
 
 // The field moves as a body rather than coming apart. A divergence-free
@@ -126,7 +126,11 @@ vec2 gazePush(vec3 d){
 vec3 flowDir(vec3 d){
   float amount = uFlow;
   if (amount < 0.001) return d;
-  vec2 c = curl(vec2(atan(d.z, d.x) * 0.8, d.y * 1.7), uTime * 0.04);
+  // Sampled straight off the direction, never through atan. An angle wraps
+  // at plus and minus pi and the noise either side of that wrap is
+  // unrelated, which drew a hard line down the field: the mapping was
+  // seamless and the flow laid on top of it was not.
+  vec2 c = curl(vec2(d.x, d.z) * 1.5 + d.y * 0.7, uTime * 0.04);
   d.xz += c * amount * 0.4;
   d.y += (c.x - c.y) * amount * 0.14;
   return normalize(d);

@@ -42,6 +42,18 @@ const FIGURE_FRAG = /* glsl */ `
   // smooth and continuous. Nothing steps and nothing is cut.
   p += curl(p * 0.75, uTime * 0.05) * (0.04 + uFlux * 0.4);
 
+  // The judder, on the figures given one. Stepped in time and cut into
+  // slabs, the way the warehouse did it, so it snaps rather than sways.
+  // Gated, so the rest of them stay smooth and the field never does any
+  // of this: it is the bodies coming apart, not the world.
+  if (uShake > 0.001){
+    float st = floor(uTime * 11.0);
+    float slab = floor(vWorld.y * 8.0 + st * 0.4);
+    float g = hash11(slab * 3.7 + st * 1.3 + uSeed);
+    p += vec2(g - 0.5, fract(g * 17.3) - 0.5) * uShake * 0.8;
+    if (g < uShake * 0.13) discard;
+  }
+
   // Refraction. Without this a translucent body shows the same field as
   // the space behind it and disappears completely against anything busy.
   // Bending the sample by the surface is what separates the two, and it
@@ -113,7 +125,8 @@ function figureMaterial(shaderName, shared){
     Object.assign(shader.uniforms, shared);
 
     shader.vertexShader =
-      'varying vec3 vWorld;\nuniform float uTime, uFlux;\n' +
+      'varying vec3 vWorld;\nuniform float uTime, uFlux, uShake, uSeed;\n' +
+      'float vhash(float n){ return fract(sin(n) * 43758.5453123); }\n' +
       shader.vertexShader.replace(
         '#include <project_vertex>',
         // After skinning, so a posed limb is shaded and sliced where it
@@ -127,13 +140,24 @@ function figureMaterial(shaderName, shared){
            float w = sin(h * 3.1 - uTime * 1.5) * 0.6 + sin(h * 1.6 + uTime * 0.8) * 0.4;
            transformed.x += w * uFlux * 0.3;
            transformed.z += cos(h * 2.4 - uTime * 1.1) * uFlux * 0.22;
+
+           // And the judder, for the ones given one: the whole body
+           // displaced in steps, and slabs of it thrown further.
+           if (uShake > 0.001){
+             float st = floor(uTime * 11.0);
+             float j = vhash(st * 1.7 + uSeed);
+             transformed.x += (j - 0.5) * uShake * 0.2;
+             transformed.y += (fract(j * 13.7) - 0.5) * uShake * 0.1;
+             float sl = floor(h * 7.0 + st * 0.3);
+             transformed.x += (vhash(sl * 3.1 + st * 2.7 + uSeed) - 0.5) * uShake * 0.34;
+           }
          }
          vWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
          #include <project_vertex>`
       );
 
     shader.fragmentShader =
-      'varying vec3 vWorld;\nuniform float uTreat, uFlux;\n' +
+      'varying vec3 vWorld;\nuniform float uTreat, uFlux, uShake, uSeed;\n' +
       UNIFORMS + HELPERS + fieldBody(shaderName) +
       shader.fragmentShader.replace(
         'gl_FragColor = vec4( packNormalToRGB( normal ), diffuseColor.a );',
@@ -174,6 +198,8 @@ export async function buildWorld(renderer, config, onProgress){
     // Per figure, set between draws like uTreat. How far this one moves
     // with the flow. The giants run far higher.
     uFlux:   { value: 0.3 },
+    uShake:  { value: 0 },
+    uSeed:   { value: 0 },
   };
 
   // --- the field that closes around the viewer -------------------------
@@ -238,6 +264,10 @@ export async function buildWorld(renderer, config, onProgress){
       source: pool[(i * 5 + Math.floor(a * 11)) % pool.length],
       treat: cfg.treatments[i % cfg.treatments.length],
       flux: giant ? cfg.giantFlux : cfg.flux * (0.6 + a * 0.8),
+      // Every nth one judders. The giants are left out: at their size the
+      // displacement reads as the whole world jumping.
+      shake: (!giant && i % cfg.shakeEvery === 0) ? cfg.shake * (0.7 + a * 0.6) : 0,
+      seed: i * 37.1 + a * 91.3,
       angle: (i / cfg.count) * Math.PI * 2 + a * 0.6,
       radius: giant ? cfg.far * (1.1 + a * 0.5) : cfg.near + a * (cfg.far - cfg.near),
       y: giant ? (b - 0.4) * cfg.rise : (b - 0.55) * cfg.rise * 2,
@@ -295,6 +325,8 @@ export async function buildWorld(renderer, config, onProgress){
       src.holder.scale.setScalar(slot.scale);
       shared.uTreat.value = slot.treat;
       shared.uFlux.value = slot.flux;
+      shared.uShake.value = slot.shake;
+      shared.uSeed.value = slot.seed;
       renderer.render(src.sub, camera);
     }
 
