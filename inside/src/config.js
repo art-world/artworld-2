@@ -3,13 +3,30 @@
 
 export const config = {
   // Track count is derived from this array. Never hardcode a count.
+  // `scene` is what actually separates one track from the next. Six
+  // monochrome turbulence fields at the same spatial scale will always feel
+  // related however different the maths is, so how much is happening and
+  // how fast does more work here than the field alone.
+  //
+  //   figures  how many of them are in the world at once, 0..1 of the pool
+  //   scale    how big they are
+  //   detail   extra high frequency laid over the field
+  //   pan      how fast the camera travels
+  //   spin     how fast they turn on the spot
+  //   shake    how many of them judder, and how hard
   tracks: [
-    { title: '23', src: '../warehouse/assets/audio/23.m4a', shader: 'warp'     },
-    { title: '27', src: '../warehouse/assets/audio/27.m4a', shader: 'fracture' },
-    { title: '38', src: '../warehouse/assets/audio/38.m4a', shader: 'tunnel'   },
-    { title: '40', src: '../warehouse/assets/audio/40.m4a', shader: 'bodies'   },
-    { title: '41', src: '../warehouse/assets/audio/41.m4a', shader: 'strata'   },
-    { title: '42', src: '../warehouse/assets/audio/42.m4a', shader: 'swarm'    },
+    { title: '23', src: '../warehouse/assets/audio/23.m4a', shader: 'warp',
+      scene: { figures: 0.5, scale: 1.4, detail: 0.15, pan: 0.6, spin: 0.4, shake: 0.5 } },
+    { title: '27', src: '../warehouse/assets/audio/27.m4a', shader: 'fracture',
+      scene: { figures: 1.0, scale: 0.7, detail: 0.75, pan: 1.6, spin: 1.5, shake: 1.4 } },
+    { title: '38', src: '../warehouse/assets/audio/38.m4a', shader: 'tunnel',
+      scene: { figures: 0.35, scale: 2.1, detail: 0.3, pan: 0.35, spin: 0.2, shake: 0.2 } },
+    { title: '40', src: '../warehouse/assets/audio/40.m4a', shader: 'bodies',
+      scene: { figures: 0.85, scale: 1.0, detail: 0.45, pan: 1.0, spin: 0.8, shake: 0.9 } },
+    { title: '41', src: '../warehouse/assets/audio/41.m4a', shader: 'strata',
+      scene: { figures: 0.6, scale: 1.25, detail: 0.9, pan: 0.8, spin: 0.5, shake: 1.8 } },
+    { title: '42', src: '../warehouse/assets/audio/42.m4a', shader: 'swarm',
+      scene: { figures: 1.0, scale: 0.85, detail: 0.6, pan: 1.3, spin: 1.1, shake: 0.7 } },
   ],
 
   field: {
@@ -83,6 +100,18 @@ export const config = {
       radius: 6.5,
       rise: 2.0,
     },
+  },
+
+  render: {
+    // This is fragment bound: at device ratio 2 it draws four times the
+    // pixels of ratio 1 for a very heavy shader, and the grade lays grain
+    // and scanlines over everything afterwards, which hides most of what
+    // the extra resolution buys. Measured: 35fps at 2, comfortably past 60
+    // at 1.5 on the same machine.
+    maxPixelRatio: 1.5,
+    // The whole piece is motion. Anyone who has asked their system not to
+    // move things gets the field and the figures held nearly still.
+    respectReducedMotion: true,
   },
 
   grade: {

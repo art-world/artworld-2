@@ -73,8 +73,12 @@ const FIGURE_FRAG = /* glsl */ `
   float keep = smoothstep(0.02 + uFlux * 0.1, 0.4 + uFlux * 0.08, er);
   if (keep < 0.08) discard;
 
-  float brk = smoothstep(0.14, 0.5, e2 * 0.85 + e1 * 0.3);
-  rim *= 0.3 + brk * 1.3;
+  // The edge runs as well as breaking. A flow through the threshold makes
+  // the outline ripple along its own length, so it is never a line that is
+  // simply eaten into in places.
+  vec2 edgeFlow = curl(p * 2.1 + vWorld.y * 0.5, uTime * 0.09);
+  float brk = smoothstep(0.14, 0.5, e2 * 0.85 + e1 * 0.3 + (edgeFlow.x + edgeFlow.y) * 0.2);
+  rim *= 0.3 + brk * 1.35;
   float body = face * 0.5 + rim * 0.8;
 
   // Fresnel. Thin where the surface faces you, dense where it turns away,
@@ -200,6 +204,8 @@ export async function buildWorld(renderer, config, onProgress){
     uFlux:   { value: 0.3 },
     uShake:  { value: 0 },
     uSeed:   { value: 0 },
+    uDetail: { value: 0.4 },
+    uOrigin: { value: new THREE.Vector2() },
   };
 
   // --- the field that closes around the viewer -------------------------
@@ -261,6 +267,9 @@ export async function buildWorld(renderer, config, onProgress){
     // structure you are standing inside rather than as another figure.
     const giant = i < cfg.giants;
     slots.push({
+      // Kept, because the slots are re-sorted by distance every frame and
+      // which ones are present has to be decided on something stable.
+      index: i,
       source: pool[(i * 5 + Math.floor(a * 11)) % pool.length],
       treat: cfg.treatments[i % cfg.treatments.length],
       flux: giant ? cfg.giantFlux : cfg.flux * (0.6 + a * 0.8),
@@ -278,6 +287,11 @@ export async function buildWorld(renderer, config, onProgress){
       tumble: (b - 0.5) * cfg.tumble,
     });
   }
+
+  // What the current track wants the world to be like. Defaults are the
+  // identity, so a track with no scene behaves as it did before.
+  let scene2 = { figures: 1, scale: 1, detail: 0.4, spin: 1, shake: 1 };
+  function setScene(next){ scene2 = Object.assign({}, scene2, next || {}); }
 
   function setShader(name){
     sky.material.fragmentShader = skyFragment(name);
@@ -299,10 +313,14 @@ export async function buildWorld(renderer, config, onProgress){
     const previous = renderer.autoClear;
     renderer.autoClear = false;
 
+    // How many of them this track wants. Decided on the stable index, not
+    // on the draw order, or the set would change every time they sort.
+    const live = Math.max(1, Math.round(slots.length * scene2.figures));
+
     // Transparent figures have to be drawn back to front, so the order is
     // worked out first and the positions reused rather than recomputed.
     for (const slot of slots){
-      slot.angle += slot.orbit * 0.016;
+      slot.angle += slot.orbit * 0.016 * scene2.spin;
       slot.px = Math.cos(slot.angle) * slot.radius;
       slot.pz = Math.sin(slot.angle) * slot.radius;
       const dx = slot.px - camera.position.x;
@@ -313,19 +331,20 @@ export async function buildWorld(renderer, config, onProgress){
     slots.sort((a, b) => b.dist - a.dist);
 
     for (const slot of slots){
+      if (slot.index >= live) continue;
       const src = slot.source;
       if (src.mixer && src.duration > 0) src.mixer.setTime((time + slot.phase) % src.duration);
 
       src.holder.position.set(slot.px, slot.y - slot.scale * 0.5, slot.pz);
       src.holder.rotation.set(
         Math.sin(time * 0.3 + slot.phase) * slot.tumble,
-        slot.phase + time * slot.spin,
+        slot.phase + time * slot.spin * scene2.spin,
         Math.sin(time * 0.23 + slot.phase) * slot.tumble
       );
-      src.holder.scale.setScalar(slot.scale);
+      src.holder.scale.setScalar(slot.scale * scene2.scale);
       shared.uTreat.value = slot.treat;
       shared.uFlux.value = slot.flux;
-      shared.uShake.value = slot.shake;
+      shared.uShake.value = slot.shake * scene2.shake;
       shared.uSeed.value = slot.seed;
       renderer.render(src.sub, camera);
     }
@@ -345,7 +364,12 @@ export async function buildWorld(renderer, config, onProgress){
     const v = config.view;
     shared.uReach.value = moved * v.reach;
     shared.uFlow.value = v.flow + audio.hit * v.flowHit + moved * v.flowReach;
+    shared.uDetail.value = scene2.detail;
   }
 
-  return { scene, sky, setShader, update, renderFigures, shared };
+  // Where in the field this visitor's world sits. Set once, from their
+  // connection, and never stored anywhere.
+  function setOrigin(x, y){ shared.uOrigin.value.set(x, y); }
+
+  return { scene, sky, setShader, setScene, setOrigin, update, renderFigures, shared };
 }

@@ -125,6 +125,19 @@
     .playbar i { display: block; height: 100%; width: 0%; background: #fff; }
     .playbar::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 26px; }
 
+    #readout {
+      position: absolute;
+      left: 18px;
+      bottom: 22px;
+      font-size: 15px;
+      line-height: 1.5;
+      letter-spacing: 0.12em;
+      white-space: pre;
+      opacity: 0.4;
+      user-select: none;
+    }
+    @media (max-width: 640px) { #readout { font-size: 13px; bottom: 44px; } }
+
     .mark {
       position: absolute;
       top: 26px;
@@ -171,6 +184,7 @@
       <div class="title"></div>
       <div class="hint"></div>
     </div>
+    <div id="readout"></div>
     <div class="playbar"><i></i></div>
   </div>
 

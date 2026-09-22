@@ -26,6 +26,7 @@ export function createAudio(tracks, onChange){
                   playing: false, refused: false };
   let previous = null;
   let fluxAverage = 0;
+  const preloaded = {};
   // Per-band running range. Normalising against the peak alone is not
   // enough: this material's low end sits at 96 to 100 per cent of its peak
   // for whole tracks, so the band came out pinned at 1.0 and the light it
@@ -200,7 +201,16 @@ export function createAudio(tracks, onChange){
     return state;
   }
 
-  return { element: el, state, select, toggle, update, ensureGraph, wake, unlock,
+  // Warms the browser cache for a track without touching the player, so
+  // changing track does not stall on a cold fetch.
+  function preload(index){
+    const track = tracks[(index + tracks.length) % tracks.length];
+    if (!track || preloaded[track.src]) return;
+    preloaded[track.src] = true;
+    fetch(track.src, { method: 'GET', headers: { Range: 'bytes=0-524287' } }).catch(() => {});
+  }
+
+  return { element: el, state, select, toggle, update, ensureGraph, wake, unlock, preload,
            get started(){ return ctx !== null; },
            get refused(){ return state.refused; },
            // Worth exposing: a suspended context is indistinguishable from

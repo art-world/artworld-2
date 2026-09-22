@@ -4,12 +4,19 @@ import { buildWorld } from './world.js';
 import { createAudio } from './audio.js';
 import { createGrade } from './grade.js';
 import { createUI } from './ui.js';
+import { readConnection, seedFrom, renderConnection } from './net.js';
+import { grab, pathNames } from './paths.js';
 
 const canvas = document.getElementById('view');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, config.render.maxPixelRatio));
 renderer.setSize(window.innerWidth, window.innerHeight);
+
+// Anyone who has asked their system not to animate things gets a version
+// that holds nearly still rather than one that cannot be looked at.
+const stillPlease = config.render.respectReducedMotion &&
+  window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -59,8 +66,11 @@ function go(next){
   current = ((next % n) + n) % n;
   const track = config.tracks[current];
   world.setShader(track.shader);
+  world.setScene(track.scene);
   ui.setTrack(current, track);
   audio.select(current, { autoplay: audio.started });
+  // The one after this, so changing track never waits on a cold fetch.
+  audio.preload(current + 1);
   updateHint();
 }
 
@@ -131,8 +141,23 @@ function enableTilt(){
   }
 }
 
+// Phones dim and sleep partway through a track otherwise. Released when
+// the page is hidden, and taken again when it comes back.
+let wakeLock = null;
+async function keepAwake(){
+  try {
+    if (!navigator.wakeLock || wakeLock) return;
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (err) { /* refused or unsupported, not fatal */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') keepAwake();
+});
+
 function start(){
   enableTilt();
+  keepAwake();
   audio.wake();
   if (audio.started) return;
   audio.select(current);
@@ -149,7 +174,7 @@ audio.element.addEventListener('pause', updateHint);
 
 function resize(){
   const w = window.innerWidth, h = window.innerHeight;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, config.render.maxPixelRatio));
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -160,7 +185,53 @@ window.addEventListener('resize', resize);
 const clock = new THREE.Clock();
 let lastContext = '';
 
+// Capture takes the loop over: the live one is driven by the clock, and a
+// clip has to be driven by the frame index instead or it is not repeatable.
+let capturing = false;
+
+// Held fixed while recording. A clip driven by live playback comes out
+// different on every take.
+const STILL_AUDIO = { level: 0.55, bass: 0.6, treble: 0.45, hit: 0 };
+
+function renderFrame(t, shot){
+  look.yaw = shot.yaw;
+  look.pitch = shot.pitch;
+  camera.rotation.set(shot.pitch, shot.yaw, 0, 'YXZ');
+  camera.position.set(shot.pos[0], shot.pos[1], shot.pos[2]);
+  if (camera.fov !== shot.fov){ camera.fov = shot.fov; camera.updateProjectionMatrix(); }
+  world.sky.position.copy(camera.position);
+  camera.getWorldDirection(forward);
+
+  world.update(t, STILL_AUDIO, { vel: 0 }, forward);
+
+  renderer.setRenderTarget(grade.target);
+  renderer.clear();
+  renderer.render(world.scene, camera);
+  world.renderFigures(renderer, camera, t, STILL_AUDIO);
+  grade.render(t, STILL_AUDIO.level);
+}
+
+const capture = {
+  canvas,
+  renderer,
+  setSize(w, h){
+    capturing = true;
+    renderer.setPixelRatio(1);          // the size asked for, exactly
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    grade.setSize(w, h);
+  },
+  renderFrame,
+  restore(){
+    capturing = false;
+    resize();
+    requestAnimationFrame(frame);
+  },
+};
+
 function frame(){
+  if (capturing) return;
   const time = clock.getElapsedTime();
   const now = performance.now() / 1000;
   const levels = audio.update();
@@ -174,7 +245,7 @@ function frame(){
   look.vPitch *= v.damping;
   drag.moved *= 0.9;
 
-  const idle = now - lastInput > v.idle;
+  const idle = now - lastInput > v.idle && !stillPlease;
   if (idle && tilt.yaw === null){
     look.yaw += v.driftYaw * 0.016;
     look.pitch += Math.sin(time * 0.07) * v.driftPitch * 0.016;
@@ -192,10 +263,11 @@ function frame(){
   // never sits still, and wide enough that figures pass each other rather
   // than only turning on the spot.
   const pan = v.pan;
+  const rate = pan.rate * (config.tracks[current].scene.pan || 1) * (stillPlease ? 0.15 : 1);
   camera.position.set(
-    Math.sin(time * pan.rate) * pan.radius + Math.sin(time * pan.rate * 2.7 + 1.3) * pan.radius * 0.28,
-    Math.sin(time * pan.rate * 0.71 + 1.1) * pan.rise,
-    Math.cos(time * pan.rate * 0.83) * pan.radius + Math.cos(time * pan.rate * 1.9) * pan.radius * 0.22
+    Math.sin(time * rate) * pan.radius + Math.sin(time * rate * 2.7 + 1.3) * pan.radius * 0.28,
+    Math.sin(time * rate * 0.71 + 1.1) * pan.rise,
+    Math.cos(time * rate * 0.83) * pan.radius + Math.cos(time * rate * 1.9) * pan.radius * 0.22
   );
   world.sky.position.copy(camera.position);
 
@@ -216,9 +288,31 @@ function frame(){
   requestAnimationFrame(frame);
 }
 
+// The world is generated from the visitor's own connection: the field is
+// offset by it, so nobody is standing where anybody else is. Read once,
+// shown, used, and let go. Nothing is stored and nothing is sent anywhere.
+readConnection().then((connection) => {
+  const seed = seedFrom(connection);
+  if (seed) world.setOrigin(seed, seed * 0.61);
+  const el = document.getElementById('readout');
+  if (el) renderConnection(el, connection);
+}).catch(() => { /* no readout, no world offset, nothing broken */ });
+
+// Capture is part of the piece rather than a debug hook: every vertical
+// clip is a crop of this world, and CLAUDE.md asks for it to be named and
+// repeatable. From the console: ARTWORLD.grab('turn', { seconds: 12 }).
+window.ARTWORLD = {
+  paths: pathNames,
+  tracks: config.tracks.map((t) => t.title),
+  go: (i) => go(i),
+  grab: (name, options) => grab(name, capture, options),
+};
+
 resize();
 ui.setTrack(current, config.tracks[current]);
 world.setShader(config.tracks[current].shader);
+world.setScene(config.tracks[current].scene);
+audio.preload(current + 1);
 updateHint();
 ui.reveal();
 document.body.classList.add('loaded');

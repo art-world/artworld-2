@@ -20,6 +20,8 @@ uniform float uGain;
 uniform vec3  uLook;      // where the viewer is facing
 uniform float uReach;     // how hard the viewer is disturbing the field
 uniform float uFlow;      // how hard the field itself is moving
+uniform float uDetail;    // extra high frequency over the top, per track
+uniform vec2  uOrigin;    // where in the field this visitor's world sits
 `;
 
 export const HELPERS = /* glsl */ `
@@ -107,7 +109,10 @@ vec2 mapDir(vec3 d){
   // against a wall roughly four units across, and several of them fade out
   // past that, so a mapping that roams further just returns black.
   float r = 1.35 * cos(lat);
-  return vec2(cos(lon), sin(lon)) * r + vec2(0.0, lat * 0.95);
+  // uOrigin comes from the visitor's own connection, so two people are not
+  // standing in the same part of the field. It is an offset rather than a
+  // scale: the field keeps the shape it was tuned for.
+  return vec2(cos(lon), sin(lon)) * r + vec2(0.0, lat * 0.95) + uOrigin;
 }
 
 // The viewer disturbs what they are looking at. Tight, so it is a pressure
@@ -409,8 +414,24 @@ varying vec3 vDir;
 void main(){
   vec3 d = flowDir(normalize(vDir));
   vec2 p = mapDir(d) + gazePush(d);
-  float c = clamp(field(p), 0.0, 1.0) * uGain;
-  gl_FragColor = vec4(vec3(c), 1.0);
+  float c = clamp(field(p), 0.0, 1.0);
+
+  // Detail laid over whatever the field produced. Two octaves well above
+  // the field's own scale, one drifting against the other, so the same
+  // field can sit almost bare on one track and swarm on another. Applied
+  // as a multiply rather than an add: it eats into the field's own shapes
+  // instead of fogging a layer over the top of them.
+  if (uDetail > 0.001){
+    float f1 = turb(p * 5.5 + uTime * 0.16);
+    float f2 = turb(p * 13.0 - uTime * 0.27);
+    float fine = mix(f1, f2, 0.45);
+    c = mix(c, c * (0.35 + fine * 1.75), uDetail);
+    // And a little of it standing on its own in the dark, so the black is
+    // never empty on the busier tracks.
+    c += pow(fine, 3.0) * uDetail * 0.5;
+  }
+
+  gl_FragColor = vec4(vec3(clamp(c, 0.0, 1.0) * uGain), 1.0);
 }
 `;
 }
