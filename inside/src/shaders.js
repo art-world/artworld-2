@@ -19,7 +19,7 @@ uniform float uHit;
 uniform float uGain;
 uniform vec3  uLook;      // where the viewer is facing
 uniform float uReach;     // how hard the viewer is disturbing the field
-uniform float uTear;      // how badly the field itself is breaking up
+uniform float uFlow;      // how hard the field itself is moving
 `;
 
 export const HELPERS = /* glsl */ `
@@ -118,17 +118,17 @@ vec2 gazePush(vec3 d){
   return vec2(d.z, d.x) * k * 1.1;
 }
 
-// The field breaks up in horizontal slabs, each one turned a little off the
-// rest. Stepped in time rather than smoothed, so it reads as a signal
-// coming apart rather than as the world wobbling. Being slabs of direction
-// rather than of screen, they stay put in the world as you look around.
-vec3 tearDir(vec3 d){
-  float amount = uTear;
+// The field moves as a body rather than coming apart. A divergence-free
+// push on the direction itself, so the whole surround slides and folds
+// around you and nothing ever steps or cuts. Continuous in time, and a
+// function of direction rather than of screen, so it stays anchored in the
+// world as you look around.
+vec3 flowDir(vec3 d){
+  float amount = uFlow;
   if (amount < 0.001) return d;
-  float slab = floor(d.y * (6.0 + amount * 16.0) + uTime * 0.4);
-  float g = hash11(slab * 5.3 + floor(uTime * 6.0) * 1.7);
-  d.xz = rot((g - 0.5) * amount * 1.6) * d.xz;
-  d.y += (fract(g * 23.1) - 0.5) * amount * 0.12;
+  vec2 c = curl(vec2(atan(d.z, d.x) * 0.8, d.y * 1.7), uTime * 0.04);
+  d.xz += c * amount * 0.4;
+  d.y += (c.x - c.y) * amount * 0.14;
   return normalize(d);
 }
 `;
@@ -403,7 +403,7 @@ export function skyFragment(name){
 varying vec3 vDir;
 
 void main(){
-  vec3 d = tearDir(normalize(vDir));
+  vec3 d = flowDir(normalize(vDir));
   vec2 p = mapDir(d) + gazePush(d);
   float c = clamp(field(p), 0.0, 1.0) * uGain;
   gl_FragColor = vec4(vec3(c), 1.0);

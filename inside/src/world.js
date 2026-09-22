@@ -38,15 +38,15 @@ const FIGURE_FRAG = /* glsl */ `
   vec3 dir = normalize(vWorld - cameraPosition);
   vec2 p = mapDir(dir) + gazePush(dir);
 
-  // Block tearing. The body is cut into horizontal slabs and each one
-  // samples the field from somewhere else, stepped in time rather than
-  // smooth so it reads as signal breaking up and not as wobble.
-  float slab = floor(vWorld.y * (4.0 + uGlitch * 13.0) + uTime * 0.6);
-  float gh = hash11(slab * 3.7 + floor(uTime * 7.0) * 1.3);
-  p += vec2(gh - 0.5, fract(gh * 17.3) - 0.5) * (0.2 + uGlitch * 1.5);
+  // The body's sampling drifts through the same flow as everything else,
+  // smooth and continuous. Nothing steps and nothing is cut.
+  p += curl(p * 0.75, uTime * 0.05) * (0.04 + uFlux * 0.4);
 
-  // Whole slabs drop out.
-  if (gh < uGlitch * 0.16) discard;
+  // Refraction. Without this a translucent body shows the same field as
+  // the space behind it and disappears completely against anything busy.
+  // Bending the sample by the surface is what separates the two, and it
+  // reads as glass rather than as a hole.
+  p += normal.xy * (0.22 + uFlux * 0.18);
 
   float v = clamp(field(p), 0.0, 1.0);
 
@@ -58,60 +58,82 @@ const FIGURE_FRAG = /* glsl */ `
   float e1 = turb(p * 1.3 + uTime * 0.12);
   float e2 = turb(p * 4.0 - uTime * 0.26);
   float er = e1 * 0.62 + e2 * 0.45;
-  float keep = smoothstep(0.02 + uGlitch * 0.16, 0.4 + uGlitch * 0.1, er);
+  float keep = smoothstep(0.02 + uFlux * 0.1, 0.4 + uFlux * 0.08, er);
   if (keep < 0.08) discard;
 
   float brk = smoothstep(0.14, 0.5, e2 * 0.85 + e1 * 0.3);
   rim *= 0.3 + brk * 1.3;
   float body = face * 0.5 + rim * 0.8;
 
-  // Metal: the facing term cut into hard bands, which is what reads as
-  // polished rather than lit.
+  // Fresnel. Thin where the surface faces you, dense where it turns away,
+  // which is how anything translucent actually behaves and the reason a
+  // body stops reading as a solid the moment it is applied.
+  float fres = pow(1.0 - abs(normal.z), 3.0);
+  // A single narrow highlight, the thing that says polished rather than
+  // matte. No broad facing term anywhere below: a term that barely varies
+  // across the body is exactly what comes out as flat grey.
+  float spec = smoothstep(0.86, 0.995, face);
+
+  // Metal: the facing term cut into hard bands.
   float band = fract(face * 4.0 + rim * 1.6 - uTime * 0.25);
   float chrome = smoothstep(0.3, 0.46, band) * (1.0 - smoothstep(0.54, 0.72, band));
-  float mMetal = v * 0.32 + chrome * (0.7 + uHit * 0.35) + rim * 0.45;
+  float mMetal = v * 0.3 + chrome * (0.75 + uHit * 0.35) + rim * 0.5;
 
-  // Shell: the field almost untouched inside, silhouette carrying it.
-  float mShell = v * (0.92 + body * 0.35) + rim * (1.0 + uHit * 0.45) + face * 0.16;
+  // Glass: the field showing through almost untouched, held together by
+  // the edge and the highlight alone.
+  float mShell = v * (0.78 + body * 0.3) + rim * (1.05 + uHit * 0.45) + spec * 0.55;
 
   // Etched: contour across the form, interior left open.
   float et = fract(face * 7.0 - rim * 2.0 + uTime * 0.14);
   float etch = (1.0 - smoothstep(0.0, 0.11, abs(et - 0.5))) * (0.62 + uTreble * 0.45);
-  float mEtch = v * 0.72 + etch * 1.2 + rim * 0.55;
+  float mEtch = v * 0.6 + etch * 1.15 + rim * 0.6 + spec * 0.3;
 
   float wMetal = 1.0 - smoothstep(0.12, 0.34, uTreat);
   float wEtch = smoothstep(0.66, 0.88, uTreat);
   float wShell = clamp(1.0 - wMetal - wEtch, 0.0, 1.0);
 
   float lit = (mMetal * wMetal + mShell * wShell + mEtch * wEtch) * keep;
-  gl_FragColor = vec4(vec3(clamp(lit, 0.0, 1.0) * uGain), 1.0);
+
+  // Actually transparent, not merely dark. The field behind a body reads
+  // straight through the middle of it and the form is carried by the edge,
+  // the highlight and whatever the field is doing underneath.
+  float alpha = clamp(0.34 + fres * 0.85 + spec * 0.8 + chrome * wMetal * 0.55, 0.0, 1.0) * keep;
+  gl_FragColor = vec4(vec3(clamp(lit, 0.0, 1.0) * uGain), alpha);
 `;
 
 function figureMaterial(shaderName, shared){
-  const material = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
+  const material = new THREE.MeshNormalMaterial({
+    side: THREE.DoubleSide,
+    transparent: true,
+    // Off, or a near figure punches a hole in every one behind it. The
+    // slots are drawn back to front below instead.
+    depthWrite: false,
+  });
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, shared);
 
     shader.vertexShader =
-      'varying vec3 vWorld;\nuniform float uTime, uGlitch;\n' +
-      'float vhash(float n){ return fract(sin(n) * 43758.5453123); }\n' +
+      'varying vec3 vWorld;\nuniform float uTime, uFlux;\n' +
       shader.vertexShader.replace(
         '#include <project_vertex>',
         // After skinning, so a posed limb is shaded and sliced where it
         // actually is. Slicing the geometry rather than only the shading
         // is what makes the break look like the body came apart.
         `{
-           float sl = floor(transformed.y * (6.0 + uGlitch * 10.0) + uTime * 0.7);
-           float g = vhash(sl * 7.1 + floor(uTime * 5.0) * 2.3);
-           transformed.x += (g - 0.5) * uGlitch * 0.5;
-           transformed.z += (fract(g * 31.7) - 0.5) * uGlitch * 0.36;
+           // A wave travelling up the body, two rates so it never settles
+           // into a single rhythm. Continuous: the geometry bends rather
+           // than breaking into offset slabs.
+           float h = transformed.y;
+           float w = sin(h * 3.1 - uTime * 1.5) * 0.6 + sin(h * 1.6 + uTime * 0.8) * 0.4;
+           transformed.x += w * uFlux * 0.3;
+           transformed.z += cos(h * 2.4 - uTime * 1.1) * uFlux * 0.22;
          }
          vWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
          #include <project_vertex>`
       );
 
     shader.fragmentShader =
-      'varying vec3 vWorld;\nuniform float uTreat, uGlitch;\n' +
+      'varying vec3 vWorld;\nuniform float uTreat, uFlux;\n' +
       UNIFORMS + HELPERS + fieldBody(shaderName) +
       shader.fragmentShader.replace(
         'gl_FragColor = vec4( packNormalToRGB( normal ), diffuseColor.a );',
@@ -144,13 +166,14 @@ export async function buildWorld(renderer, config, onProgress){
     uGain:   { value: config.field.gain },
     uLook:   { value: new THREE.Vector3(0, 0, -1) },
     uReach:  { value: 0 },
-    uTear:   { value: 0 },
+    uFlow:   { value: 0 },
     // Set per figure, between draws. It has to exist before the materials
     // compile: onBeforeCompile copies this object at compile time and a key
     // added afterwards is never bound to anything.
     uTreat:  { value: 0.5 },
-    // Per figure, set between draws like uTreat. The giants run far higher.
-    uGlitch: { value: 0.3 },
+    // Per figure, set between draws like uTreat. How far this one moves
+    // with the flow. The giants run far higher.
+    uFlux:   { value: 0.3 },
   };
 
   // --- the field that closes around the viewer -------------------------
@@ -214,7 +237,7 @@ export async function buildWorld(renderer, config, onProgress){
     slots.push({
       source: pool[(i * 5 + Math.floor(a * 11)) % pool.length],
       treat: cfg.treatments[i % cfg.treatments.length],
-      glitch: giant ? cfg.giantGlitch : cfg.glitch * (0.6 + a * 0.8),
+      flux: giant ? cfg.giantFlux : cfg.flux * (0.6 + a * 0.8),
       angle: (i / cfg.count) * Math.PI * 2 + a * 0.6,
       radius: giant ? cfg.far * (1.1 + a * 0.5) : cfg.near + a * (cfg.far - cfg.near),
       y: giant ? (b - 0.4) * cfg.rise : (b - 0.55) * cfg.rise * 2,
@@ -246,15 +269,24 @@ export async function buildWorld(renderer, config, onProgress){
     const previous = renderer.autoClear;
     renderer.autoClear = false;
 
+    // Transparent figures have to be drawn back to front, so the order is
+    // worked out first and the positions reused rather than recomputed.
+    for (const slot of slots){
+      slot.angle += slot.orbit * 0.016;
+      slot.px = Math.cos(slot.angle) * slot.radius;
+      slot.pz = Math.sin(slot.angle) * slot.radius;
+      const dx = slot.px - camera.position.x;
+      const dy = (slot.y - slot.scale * 0.5) - camera.position.y;
+      const dz = slot.pz - camera.position.z;
+      slot.dist = dx * dx + dy * dy + dz * dz;
+    }
+    slots.sort((a, b) => b.dist - a.dist);
+
     for (const slot of slots){
       const src = slot.source;
       if (src.mixer && src.duration > 0) src.mixer.setTime((time + slot.phase) % src.duration);
 
-      slot.angle += slot.orbit * 0.016;
-      const x = Math.cos(slot.angle) * slot.radius;
-      const z = Math.sin(slot.angle) * slot.radius;
-
-      src.holder.position.set(x, slot.y - slot.scale * 0.5, z);
+      src.holder.position.set(slot.px, slot.y - slot.scale * 0.5, slot.pz);
       src.holder.rotation.set(
         Math.sin(time * 0.3 + slot.phase) * slot.tumble,
         slot.phase + time * slot.spin,
@@ -262,7 +294,7 @@ export async function buildWorld(renderer, config, onProgress){
       );
       src.holder.scale.setScalar(slot.scale);
       shared.uTreat.value = slot.treat;
-      shared.uGlitch.value = slot.glitch;
+      shared.uFlux.value = slot.flux;
       renderer.render(src.sub, camera);
     }
 
@@ -280,7 +312,7 @@ export async function buildWorld(renderer, config, onProgress){
     const moved = pointer ? pointer.vel : 0;
     const v = config.view;
     shared.uReach.value = moved * v.reach;
-    shared.uTear.value = v.tear + audio.hit * v.tearHit + moved * v.tearReach;
+    shared.uFlow.value = v.flow + audio.hit * v.flowHit + moved * v.flowReach;
   }
 
   return { scene, sky, setShader, update, renderFigures, shared };
