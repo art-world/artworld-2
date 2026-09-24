@@ -5,6 +5,7 @@
 // the field it is standing in. A front runs across it between the two, so
 // the cheap object and the expensive one are the same thing at different
 // moments. The field bends round it. It rings until someone answers it.
+// The camera goes round it, up close to it and straight through it.
 //
 // Every displacement is a function of position and time only, never of a
 // normal, so the scan's split vertices move together and the mesh bends
@@ -44,9 +45,6 @@ uniform float uBoothSeed;
 uniform float uLag;      // ghosts run behind the booth in time
 uniform float uEchoShift;
 uniform float uGhost;
-uniform float uPointSize;
-uniform float uAge;
-uniform float uPulseSeed;
 uniform sampler2D uMap;
 uniform sampler2D uSign;
 uniform float uSignOn;
@@ -54,7 +52,7 @@ uniform vec4  uSignRect;
 `;
 
 // The shape, in the booth's own space: one unit tall, centred on the
-// origin. Shared by the booth, its ghosts and its transmissions.
+// origin. Shared by the booth and its ghosts.
 const DEFORM = /* glsl */ `
 vec3 deform(vec3 p, float t){
   float y = p.y + 0.5;
@@ -247,38 +245,7 @@ void main(){
 }
 `;
 
-// Transmissions. The booth's own points, sent outward in slabs that leave
-// at different moments, fading as they go.
-const PULSE_VERT = /* glsl */ `
-varying float vFade;
-void main(){
-  vec3 p = deform(position, uTime);
-  float y = position.y + 0.5;
-  float slab = floor(y * 30.0);
-  float lag = hash11(slab * 3.1 + uPulseSeed) * 0.35;
-  float a = clamp((uAge - lag) / (1.0 - lag), 0.0, 1.0);
-  float e = 1.0 - pow(1.0 - a, 3.0);
-  p.xz *= 1.0 + e * (0.7 + hash11(slab + uPulseSeed * 1.7) * 1.6);
-  p.y += e * (hash11(slab * 7.7 + uPulseSeed) - 0.35) * 0.7;
-  p += (vec3(noise3(p * 6.0 + uPulseSeed), noise3(p * 6.0 + 11.0), noise3(p * 6.0 + 23.0)) - 0.5) * e * 0.35;
-  // Faded in over the first moment, or every point starts stacked on the
-  // surface it came from and the booth blows out to white.
-  vFade = smoothstep(0.0, 0.12, a) * (1.0 - a) * (1.0 - a);
-  gl_PointSize = uPointSize;
-  gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(p, 1.0);
-}
-`;
-
-const PULSE_FRAG = /* glsl */ `
-varying float vFade;
-void main(){
-  if (vFade < 0.003) discard;
-  gl_FragColor = vec4(vec3(vFade * 0.45), 1.0);
-}
-`;
-
 const vertexShader = UNIFORMS + BOOTH_UNIFORMS + HELPERS + NOISE3 + DEFORM + VERTEX;
-const pulseVertex = UNIFORMS + BOOTH_UNIFORMS + HELPERS + NOISE3 + DEFORM + PULSE_VERT;
 
 // The scan arrives as one mesh under a rotated, quantised node. Everything
 // is baked into plain floats in the booth's own space, one unit tall and
@@ -400,23 +367,6 @@ function unit(v, o, k){
   return v[o + k] / len;
 }
 
-// Every other point of the scan, for the transmissions. All of them is
-// far more than the eye can separate once they start to spread.
-function thinned(geometry, step){
-  const src = geometry.attributes.position.array;
-  const count = Math.floor(src.length / 3 / step);
-  const out = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++){
-    out[i * 3] = src[i * step * 3];
-    out[i * 3 + 1] = src[i * step * 3 + 1];
-    out[i * 3 + 2] = src[i * step * 3 + 2];
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(out, 3));
-  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 4);
-  return g;
-}
-
 // The phone's ring as a pattern of on and off, in seconds. Nothing is
 // heard: the booth shudders on the beats of it, and that is enough to know
 // what it is doing.
@@ -446,7 +396,7 @@ function signTexture(){
   return { canvas, texture };
 }
 
-export function createBooth(gltf, cfg, shared, shaderName, pixelRatio){
+export function createBooth(gltf, cfg, shared, shaderName){
   const { geometry, map, extent } = prepare(gltf);
   const sign = signTexture();
 
@@ -466,12 +416,11 @@ export function createBooth(gltf, cfg, shared, shaderName, pixelRatio){
     uSign:      { value: sign.texture },
     uSignOn:    { value: 0 },
     uSignRect:  { value: new THREE.Vector4(...cfg.sign) },
-    uPointSize: { value: cfg.pointSize * pixelRatio },
   };
 
   // Per draw: which ghost this is, how late and how far along the line.
   const perDraw = (extra) => Object.assign({}, shared, own, {
-    uLag: { value: 0 }, uEchoShift: { value: 0 }, uAge: { value: 0 }, uPulseSeed: { value: 0 },
+    uLag: { value: 0 }, uEchoShift: { value: 0 },
   }, extra);
 
   const group = new THREE.Group();
@@ -507,24 +456,6 @@ export function createBooth(gltf, cfg, shared, shaderName, pixelRatio){
     group.add(g);
   }
 
-  const points = thinned(geometry, 2);
-  const pulses = [];
-  for (let i = 0; i < cfg.pulses; i++){
-    const p = new THREE.Points(points, new THREE.ShaderMaterial({
-      uniforms: perDraw(),
-      vertexShader: pulseVertex,
-      fragmentShader: PULSE_FRAG,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }));
-    p.renderOrder = 3;
-    p.frustumCulled = false;
-    p.visible = false;
-    pulses.push({ points: p, born: -1, seed: 0 });
-    group.add(p);
-  }
-
   // Current look and the one it is heading for. Changing track moves the
   // target; the booth gets there over a second or two, under the cover of
   // the call going through.
@@ -535,35 +466,15 @@ export function createBooth(gltf, cfg, shared, shaderName, pixelRatio){
   let last = 0;
   let connectAt = -99;
   let ringLevel = 0;
-  let wasOn = false;
-  let lastPulse = -99;
-  let pulseCount = 0;
 
-  function pulse(time){
-    // The oldest one is reused. There are never so many that it shows.
-    let slot = pulses[0];
-    for (const p of pulses) if (p.born < slot.born) slot = p;
-    slot.born = time;
-    slot.seed = (pulseCount++ * 7.31) % 97;
-    slot.points.visible = true;
-    lastPulse = time;
-  }
-
-  function connect(){
-    connectAt = last;
-    pulse(last);
-  }
+  function connect(){ connectAt = last; }
 
   const toBooth = new THREE.Vector3();
 
   function update(time, audio, camera, state){
-    // Time can run backwards when a capture starts from zero. Anything in
-    // flight is dropped rather than left stuck.
-    if (time < last){
-      connectAt = -99;
-      lastPulse = -99;
-      for (const p of pulses){ p.born = -1; p.points.visible = false; }
-    }
+    // Time can run backwards when a capture starts from zero. A call in
+    // progress is dropped rather than left stuck.
+    if (time < last) connectAt = -99;
     last = time;
 
     for (const key in target) look[key] += (target[key] - look[key]) * 0.03;
@@ -580,12 +491,9 @@ export function createBooth(gltf, cfg, shared, shaderName, pixelRatio){
 
     const on = state.ringing && ringing(time, cfg.ring);
     ringLevel += ((on ? 1 : 0) - ringLevel) * 0.45;
-    if (on && !wasOn) pulse(time);
-    wasOn = on;
 
     const connecting = Math.exp(-Math.max(0, time - connectAt) * 4.2);
     const hit = audio.hit || 0;
-    if (!state.still && hit > cfg.pulseOn && time - lastPulse > cfg.pulseGap) pulse(time);
 
     // The mirror comes and goes on a slow tide, pushed in on the low end.
     const tide = Math.sin(time * 0.11) * 0.22 + Math.sin(time * 0.047 + 1.0) * 0.12;
@@ -605,22 +513,19 @@ export function createBooth(gltf, cfg, shared, shaderName, pixelRatio){
         (i + 1) * height * 0.045 * (0.5 + own.uGhost.value);
     }
 
-    for (const p of pulses){
-      if (p.born < 0) continue;
-      const age = (time - p.born) / cfg.pulseLife;
-      if (age >= 1){ p.born = -1; p.points.visible = false; continue; }
-      p.points.material.uniforms.uAge.value = age;
-      p.points.material.uniforms.uPulseSeed.value = p.seed;
-    }
-
     // The field bends round it. Measured from wherever the viewer is, so
-    // the pull is strongest along the line of sight to it.
+    // the pull is strongest along the line of sight to it. It lets go as
+    // the camera closes in: from inside the booth there is no line of
+    // sight to bend round, and a lens that size would turn the whole sky
+    // inside out on the way through the wall.
     toBooth.copy(group.position).sub(camera.position);
     const dist = Math.max(toBooth.length(), 1e-3);
     shared.uLensDir.value.copy(toBooth).divideScalar(dist);
     const halfWidth = Math.max(extent.x, extent.z) * 0.5 * height;
-    shared.uLensSize.value = Math.atan(halfWidth / dist);
-    shared.uLensMass.value = look.lens * (1 + hit * 0.25 + ringLevel * 0.35 + connecting * 1.1);
+    shared.uLensSize.value = Math.min(Math.atan(halfWidth / dist), 0.6);
+    const close = THREE.MathUtils.smoothstep(dist, halfWidth * 1.4, halfWidth * 3.2);
+    shared.uLensMass.value = look.lens * close *
+      (1 + hit * 0.25 + ringLevel * 0.35 + connecting * 1.1);
     shared.uLensSwirl.value = look.swirl * Math.sin(time * 0.13) + connecting * 2.2;
 
     return { ring: ringLevel, connect: connecting };
@@ -631,13 +536,6 @@ export function createBooth(gltf, cfg, shared, shaderName, pixelRatio){
     material.needsUpdate = true;
   }
 
-  // How far out the booth reaches from its own axis, pooled foot included.
-  // The camera keeps outside this.
-  function reach(){
-    const h = cfg.height * look.size;
-    return Math.hypot(extent.x, extent.z) * 0.5 * h * (1 + look.melt * 0.6) + cfg.clearance;
-  }
-
   // A ray against the booth's box, in its own space. The scan is one fused
   // mesh with no parts to aim at, and the whole kiosk is the thing to touch.
   const hitBox = new THREE.Box3().copy(geometry.boundingBox).expandByScalar(0.04);
@@ -646,6 +544,9 @@ export function createBooth(gltf, cfg, shared, shaderName, pixelRatio){
   function hit(ray){
     inverse.copy(group.matrixWorld).invert();
     local.copy(ray).applyMatrix4(inverse);
+    // From inside it, every ray would hit it. Inside is not a place to
+    // tap it from.
+    if (hitBox.containsPoint(local.origin)) return false;
     return local.intersectsBox(hitBox);
   }
 
@@ -681,6 +582,6 @@ export function createBooth(gltf, cfg, shared, shaderName, pixelRatio){
     own.uSignOn.value = 1;
   }
 
-  return { group, update, connect, setLook, setShader, setSign, reach, hit,
+  return { group, update, connect, setLook, setShader, setSign, hit,
            get y(){ return group.position.y; } };
 }

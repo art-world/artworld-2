@@ -12,7 +12,7 @@ export const config = {
   //   figures  how many of them are in the world at once, 0..1 of the pool
   //   scale    how big they are
   //   detail   extra high frequency laid over the field
-  //   pan      how fast the camera travels
+  //   pan      how fast the camera travels the tour
   //   spin     how fast they turn on the spot
   //   shake    how many of them judder, and how hard
   //   booth    what state the booth is in, over booth.look below
@@ -67,8 +67,6 @@ export const config = {
     spin: 0.06,      // radians per second on its own axis
     bob: 0.22,
     lean: 0.07,
-    // How close the camera may come, past the booth's own width.
-    clearance: 1.7,
     // Where the sign is, in the booth's own space: one unit tall, centred.
     // x0, y0, x1, y1 on the front face. The connection is shown there.
     sign: [-0.176, 0.356, 0.195, 0.423],
@@ -77,11 +75,6 @@ export const config = {
     ring: [0.4, 0.2, 0.4, 2.0],
     ghosts: 2,       // multipath copies, late and to one side
     ghost: 0.25,     // how visible they are with nothing happening
-    pulses: 6,       // transmissions in flight at once, at most
-    pulseLife: 1.8,  // seconds
-    pulseOn: 0.55,   // an onset this strong sends one
-    pulseGap: 0.4,   // and not more often than this
-    pointSize: 2,
     // Its state when a track says nothing. Tracks override any of these.
     //   chrome  how much of it is mirror rather than scan
     //   warp    how far it bends and breathes
@@ -137,18 +130,13 @@ export const config = {
     drag: 2.6,       // radians per screen width
     ease: 0.12,
     damping: 0.94,   // how long a flick keeps travelling
-    pitchLimit: 1.25,
-    // Left alone, it keeps moving on its own.
-    driftYaw: 0.035,
-    driftPitch: 0.16,
-    idle: 2.5,       // seconds before the drift takes back over
-    // Left alone, the gaze drifts back toward the booth, and wanders off it
-    // again, so it is in view more often than not and never pinned there.
-    pull: {
-      ease: 0.008,
-      wander: 0.95,  // radians either side of it
-    },
-    fov: 78,
+    pitchLimit: 1.35,
+    // Left alone, the gaze goes back to wherever the tour is looking:
+    // slowly at first, then holding it. A drag takes it over again.
+    idle: 2.5,       // seconds before it starts going back
+    follow: 0.08,    // per frame, once it is back
+    settle: 0.012,   // how fast it gets back
+    fov: 72,         // to start with; the tour sets its own
     // The viewer pushes the field where they look.
     reach: 1.1,
     // How hard the field itself moves. Low: the field reads better close
@@ -158,13 +146,9 @@ export const config = {
     flowHit: 0.22,
     flowReach: 0.4,
 
-    // The camera travels as well as turning, so the figures move past each
-    // other instead of only rotating on the spot.
-    pan: {
-      rate: 0.055,
-      radius: 6.5,
-      rise: 2.0,
-    },
+    // The camera travels the tour in paths.js, round the booth and through
+    // it. This is how fast, times each track's own pan.
+    travel: 1,
   },
 
   render: {

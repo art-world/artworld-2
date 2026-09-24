@@ -5,7 +5,7 @@ import { createAudio } from './audio.js';
 import { createGrade } from './grade.js';
 import { createUI } from './ui.js';
 import { readConnection, seedFrom, renderConnection } from './net.js';
-import { grab, pathNames } from './paths.js';
+import { grab, pathNames, paths } from './paths.js';
 
 const canvas = document.getElementById('view');
 
@@ -223,19 +223,6 @@ window.addEventListener('resize', resize);
 const clock = new THREE.Clock();
 let lastContext = '';
 
-// The camera never goes through the booth. Distance from its axis is
-// eased outward rather than clamped, so a path that would cross it swings
-// round it instead of stopping dead against it.
-function keepClear(pos){
-  if (!world.booth) return;
-  const c = world.booth.reach();
-  const r = Math.hypot(pos.x, pos.z);
-  if (r < 1e-4){ pos.x = c; return; }
-  const k = Math.sqrt(r * r + c * c) / r;
-  pos.x *= k;
-  pos.z *= k;
-}
-
 const wrapAngle = (a) => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
 
 // Capture takes the loop over: the live one is driven by the clock, and a
@@ -251,12 +238,11 @@ function renderFrame(t, shot){
   look.pitch = shot.pitch;
   camera.rotation.set(shot.pitch, shot.yaw, 0, 'YXZ');
   camera.position.set(shot.pos[0], shot.pos[1], shot.pos[2]);
-  keepClear(camera.position);
   if (camera.fov !== shot.fov){ camera.fov = shot.fov; camera.updateProjectionMatrix(); }
   world.sky.position.copy(camera.position);
   camera.getWorldDirection(forward);
 
-  const booth = world.update(t, STILL_AUDIO, { vel: 0 }, forward, camera, { ringing: false, still: true });
+  const booth = world.update(t, STILL_AUDIO, { vel: 0 }, forward, camera, { ringing: false });
 
   renderer.setRenderTarget(grade.target);
   renderer.clear();
@@ -284,6 +270,22 @@ const capture = {
   },
 };
 
+// The camera travels the tour in paths.js: round the booth, up close,
+// through it, over it, down through it and away. The same named moves a
+// grab records, so the live site and a clip of it are one thing. Distance
+// along it is accumulated rather than read off the clock, so a track that
+// moves faster or slower changes the speed without jumping the camera.
+let travelled = 0;
+let lastTime = 0;
+// How far the gaze has gone back to the tour's since the visitor last
+// took it over. Starts fully back: nobody has touched anything yet.
+let follow = 1;
+{
+  const first = paths.tour(0);
+  look.yaw = first.yaw;
+  look.pitch = first.pitch;
+}
+
 function frame(){
   if (capturing) return;
   const time = clock.getElapsedTime();
@@ -291,56 +293,51 @@ function frame(){
   const levels = audio.update();
   const v = config.view;
 
-  // Momentum, then damping. Left alone for a moment the drift takes over,
-  // so it is never a still image even with nobody touching it.
+  const dt = Math.min(0.1, Math.max(0, time - lastTime));
+  lastTime = time;
+  const pan = config.tracks[current].scene.pan || 1;
+  travelled += dt * v.travel * (0.5 + pan * 0.5) * (stillPlease ? 0.15 : 1);
+  const shot = paths.tour(travelled);
+
+  // Momentum, then damping. A flick keeps going for a moment and then
+  // the tour takes the gaze back.
   look.yaw += look.vYaw;
   look.pitch += look.vPitch;
   look.vYaw *= v.damping;
   look.vPitch *= v.damping;
   drag.moved *= 0.9;
 
-  const idle = now - lastInput > v.idle && !stillPlease;
-  if (idle && tilt.yaw === null && world.booth){
-    // Back toward the booth, and off it again on a slow wander, from
-    // wherever the camera has got to.
-    const p = camera.position;
-    const dx = -p.x, dz = -p.z, dy = world.booth.y - p.y;
-    const w = v.pull.wander;
-    const yawTo = Math.atan2(-dx, -dz) + Math.sin(time * 0.043) * w + Math.sin(time * 0.017 + 2.0) * w * 0.6;
-    const pitchTo = Math.atan2(dy, Math.hypot(dx, dz)) + Math.sin(time * 0.07) * v.driftPitch;
-    look.yaw += wrapAngle(yawTo - look.yaw) * v.pull.ease;
-    look.pitch += (pitchTo - look.pitch) * v.pull.ease;
-  } else if (idle && tilt.yaw === null){
-    look.yaw += v.driftYaw * 0.016;
-    look.pitch += Math.sin(time * 0.07) * v.driftPitch * 0.016;
-  }
-
   if (tilt.yaw !== null){
-    look.yaw += (tilt.yaw - look.yaw) * v.ease;
-    look.pitch += (tilt.pitch - look.pitch) * v.ease;
+    // The phone turns the view about wherever the tour is looking, so it
+    // looks round the booth rather than away from it for good.
+    look.yaw += wrapAngle(shot.yaw + tilt.yaw - look.yaw) * v.ease;
+    look.pitch += (shot.pitch + tilt.pitch - look.pitch) * v.ease;
+  } else if (now - lastInput > v.idle){
+    // Rates are per frame at 60, scaled to the real frame time, so a phone
+    // running at 30 comes back as quickly as a desktop at 120.
+    const frames = dt * 60;
+    follow += (1 - follow) * (1 - Math.pow(1 - v.settle, frames));
+    const k = 1 - Math.pow(1 - v.follow * follow, frames);
+    look.yaw += wrapAngle(shot.yaw - look.yaw) * k;
+    look.pitch += (shot.pitch - look.pitch) * k;
+  } else {
+    follow = 0;
   }
 
   look.pitch = Math.max(-v.pitchLimit, Math.min(v.pitchLimit, look.pitch));
   camera.rotation.set(look.pitch, look.yaw, 0, 'YXZ');
-
-  // Automatic pan. Two rates on each axis so the path never repeats and
-  // never sits still, and wide enough that figures pass each other rather
-  // than only turning on the spot.
-  const pan = v.pan;
-  const rate = pan.rate * (config.tracks[current].scene.pan || 1) * (stillPlease ? 0.15 : 1);
-  camera.position.set(
-    Math.sin(time * rate) * pan.radius + Math.sin(time * rate * 2.7 + 1.3) * pan.radius * 0.28,
-    Math.sin(time * rate * 0.71 + 1.1) * pan.rise,
-    Math.cos(time * rate * 0.83) * pan.radius + Math.cos(time * rate * 1.9) * pan.radius * 0.22
-  );
-  keepClear(camera.position);
+  camera.position.set(shot.pos[0], shot.pos[1], shot.pos[2]);
+  if (Math.abs(camera.fov - shot.fov) > 0.01){
+    camera.fov += (shot.fov - camera.fov) * (1 - Math.pow(0.95, dt * 60));
+    camera.updateProjectionMatrix();
+  }
   world.sky.position.copy(camera.position);
 
   camera.getWorldDirection(forward);
   const reach = { vel: Math.min(1, drag.moved + levels.hit * 0.35) };
   // It rings until the call is taken, and again whenever it is put down.
   const ringing = !stillPlease && (!audio.started || audio.element.paused);
-  const booth = world.update(time, levels, reach, forward, camera, { ringing, still: stillPlease });
+  const booth = world.update(time, levels, reach, forward, camera, { ringing });
 
   const el = audio.element;
   if (ui.setPlayed) ui.setPlayed(el.duration ? el.currentTime / el.duration : 0);

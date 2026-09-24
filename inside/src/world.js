@@ -248,7 +248,7 @@ export async function buildWorld(renderer, config, onProgress){
 
   // --- the booth ------------------------------------------------------
   const booth = boothGltf
-    ? createBooth(boothGltf, config.booth, shared, first, renderer.getPixelRatio())
+    ? createBooth(boothGltf, config.booth, shared, first)
     : null;
   if (booth) scene.add(booth.group);
 
