@@ -25,12 +25,12 @@ ARTWORLD, so there is no licence to chase. Its source is
 
 Baked with the glTF-Transform and meshoptimizer libraries: normals dropped
 (the shader derives its own), vertices welded, simplified with borders
-unlocked to 29.1k triangles, texture 4096px JPEG down to 1024px WebP,
-quantised and meshopt compressed. 11.6MB down to 362K. The borders have to
+unlocked to 29.1k triangles, texture 4096px JPEG down to 2048px WebP,
+quantised and meshopt compressed. 11.6MB down to 570K. The borders have to
 be unlocked because the scan's vertices are split along every UV seam, and
 `gltf-transform optimize --simplify` stalls at 141k triangles otherwise.
-The shader samples the texture nearest-neighbour, so the downsampling reads
-as crunch.
+The texture is filtered rather than sampled nearest: the camera goes up
+close to it and inside it, and nearest sampling shimmered into grain.
 
 ## Warehouse room
 

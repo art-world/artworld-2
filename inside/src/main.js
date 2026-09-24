@@ -248,7 +248,7 @@ function renderFrame(t, shot){
   renderer.clear();
   renderer.render(world.scene, camera);
   world.renderFigures(renderer, camera, t, STILL_AUDIO);
-  grade.render(t, STILL_AUDIO.level, booth.connect * 0.9);
+  grade.render(t, STILL_AUDIO.level, booth.connect * 0.4);
 }
 
 const capture = {
@@ -347,7 +347,7 @@ function frame(){
   renderer.clear();
   renderer.render(world.scene, camera);
   world.renderFigures(renderer, camera, time, levels);
-  grade.render(time, levels.level, booth.connect * (stillPlease ? 0.2 : 0.9));
+  grade.render(time, levels.level, booth.connect * (stillPlease ? 0.1 : 0.4));
 
   requestAnimationFrame(frame);
 }

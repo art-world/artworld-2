@@ -75,19 +75,19 @@ vec3 deform(vec3 p, float t){
 
   // Slabs. Stepped in time, so they jump rather than slide, and the
   // triangles across each cut stretch into a smear. A call going through
-  // throws every one of them.
+  // knocks every one of them a little out of line.
   float st = floor(t * 12.0);
   float slab = floor(y * 22.0 + hash11(st) * 4.0);
   float g = hash11(slab * 3.7 + st * 1.31 + uBoothSeed);
   vec2 shove = vec2(hash11(slab + st * 7.1), hash11(slab * 1.9 + st * 3.3)) - 0.5;
   p.xz += shove * step(g, uGlitch * 0.1) * 0.3;
   vec2 fling = vec2(hash11(slab * 5.3 + 1.7), hash11(slab * 8.9 + 4.1)) - 0.5;
-  p.xz += fling * uConnect * 1.2;
-  p.y += (hash11(slab * 2.1) - 0.5) * uConnect * 0.25;
+  p.xz += fling * uConnect * 0.4;
+  p.y += (hash11(slab * 2.1) - 0.5) * uConnect * 0.1;
 
   // The ring. A shudder too fast to follow, only while it rings.
-  p.xz += vec2(sin(t * 97.0), cos(t * 83.0)) * 0.011 * uRing;
-  p.y += sin(t * 61.0) * 0.004 * uRing;
+  p.xz += vec2(sin(t * 97.0), cos(t * 83.0)) * 0.006 * uRing;
+  p.y += sin(t * 61.0) * 0.002 * uRing;
   return p;
 }
 `;
@@ -157,9 +157,9 @@ function boothFragment(name){
 void main(){
   // Drawn in lines, like a picture coming down a wire, only while a call
   // is going through.
-  float lines = uConnect * 0.5;
+  float lines = uConnect * 0.2;
   if (lines > 0.001 && fract(vLocal.y * 95.0 - uTime * 0.6) < lines * 0.7) discard;
-  if (slabCut() < uGlitch * 0.06 + uConnect * 0.3) discard;
+  if (slabCut() < uGlitch * 0.06 + uConnect * 0.1) discard;
 
   // Smooth normals only. The simplified scan is made of long thin
   // triangles, and shading them flat drew every one as its own stripe.
@@ -193,8 +193,9 @@ void main(){
   // drips and the photo's grain across the mirror as fine vertical lines.
   float lum = dot(scanColour(), vec3(0.2126, 0.7152, 0.0722));
 
-  // The scan, lit by the field it is in rather than by anything else.
-  float scan = lum * (0.45 + env * 0.9) + fres * 0.3;
+  // The scan, close to how it was captured, with a little of the field's
+  // light on it so it still sits in the world.
+  float scan = lum * (0.9 + env * 0.3) + fres * 0.12;
 
   // The front between the two. Attached to the object, not the screen, so
   // it washes over the kiosk as it turns. Its edge runs hot.
@@ -212,8 +213,9 @@ void main(){
     scan = lum * 1.15;
   }
 
-  float v = mix(scan, chrome, mask) + edge * (1.3 + uHit * 0.8);
-  v += uRing * (0.18 + 0.18 * sin(uTime * 40.0)) * (0.4 + fres);
+  float v = mix(scan, chrome, mask) + edge * (1.0 + uHit * 0.4);
+  // A steady glow while it rings. Flickering, it read as another glitch.
+  v += uRing * 0.12 * (0.4 + fres);
 
   gl_FragColor = vec4(vec3(max(v, 0.0) * uGain), 1.0);
 }
@@ -479,19 +481,20 @@ export function createBooth(gltf, cfg, shared, shaderName){
     const on = state.ringing && ringing(time, cfg.ring);
     ringLevel += ((on ? 1 : 0) - ringLevel) * 0.45;
 
-    const connecting = Math.exp(-Math.max(0, time - connectAt) * 4.2);
+    const connecting = Math.exp(-Math.max(0, time - connectAt) * 5.5);
     const hit = audio.hit || 0;
 
-    // The mirror comes and goes on a slow tide, pushed in on the low end.
-    const tide = Math.sin(time * 0.11) * 0.22 + Math.sin(time * 0.047 + 1.0) * 0.12;
-    own.uChrome.value = THREE.MathUtils.clamp(look.chrome + tide + (audio.bass || 0) * 0.12, 0, 1);
+    // The mirror comes and goes on a slow tide, pushed in a little on the
+    // low end. Narrow, so the scan is what is mostly seen.
+    const tide = Math.sin(time * 0.11) * 0.08 + Math.sin(time * 0.047 + 1.0) * 0.04;
+    own.uChrome.value = THREE.MathUtils.clamp(look.chrome + tide + (audio.bass || 0) * 0.05, 0, 1);
     own.uWarp.value = look.warp;
     own.uMelt.value = look.melt;
-    // Only the hardest hits make it jump, on top of what the track asks.
-    own.uGlitch.value = look.glitch + Math.max(0, hit - 0.6) * 0.3;
+    // Only if a track asks for it. None does at the moment.
+    own.uGlitch.value = look.glitch;
     own.uRing.value = ringLevel;
     own.uConnect.value = connecting;
-    own.uGhost.value = cfg.ghost + ringLevel * 0.2 + connecting * 0.8;
+    own.uGhost.value = cfg.ghost + connecting * 0.4;
 
     // Not drawn at all when there is nothing to show.
     for (let i = 0; i < ghosts.length; i++){
