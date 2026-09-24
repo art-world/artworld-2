@@ -22,6 +22,10 @@ uniform float uReach;     // how hard the viewer is disturbing the field
 uniform float uFlow;      // how hard the field itself is moving
 uniform float uDetail;    // extra high frequency over the top, per track
 uniform vec2  uOrigin;    // where in the field this visitor's world sits
+uniform vec3  uLensDir;   // from the viewer to the booth
+uniform float uLensSize;  // how wide the booth looks from here, in radians
+uniform float uLensMass;  // how hard it bends the field round it
+uniform float uLensSwirl; // how far it drags the field round with it
 `;
 
 export const HELPERS = /* glsl */ `
@@ -121,6 +125,29 @@ vec2 gazePush(vec3 d){
   float towards = max(dot(normalize(d), normalize(uLook)), 0.0);
   float k = pow(towards, 18.0) * uReach;
   return vec2(d.z, d.x) * k * 1.1;   // continuous in d, no angle anywhere
+}
+
+// The booth bends the field round it. Directions near it are pulled in
+// toward the line of sight to it, hard enough close in that they cross
+// over, so what is behind it comes round the sides as a ring and the
+// middle is turned inside out. The pull is measured on an ellipse, because
+// the booth is tall. Continuous everywhere: it fades to nothing well
+// before it could reach round behind the viewer.
+vec3 lens(vec3 d){
+  if (uLensMass < 0.001) return d;
+  vec3 b = uLensDir;
+  float c = dot(d, b);
+  vec3 perp = d - b * c;
+  vec3 right = normalize(cross(b, vec3(0.0, 1.0, 0.0)) + vec3(1e-4, 0.0, 0.0));
+  vec3 up = cross(right, b);
+  vec2 q = vec2(dot(perp, right), dot(perp, up));
+  float th = length(q * vec2(1.0, 0.5)) + 1e-4;
+  float e = uLensSize * uLensMass;
+  float fade = smoothstep(-0.1, 0.5, c);
+  float pull = e * e / (th * th + e * e * 0.15) * fade;
+  float twist = uLensSwirl * e / (th + e * 0.4) * fade;
+  q = rot(twist) * q * (1.0 - pull);
+  return normalize(b * c + right * q.x + up * q.y);
 }
 
 // The field moves as a body rather than coming apart. A divergence-free
@@ -412,7 +439,7 @@ export function skyFragment(name){
 varying vec3 vDir;
 
 void main(){
-  vec3 d = flowDir(normalize(vDir));
+  vec3 d = flowDir(lens(normalize(vDir)));
   vec2 p = mapDir(d) + gazePush(d);
   float c = clamp(field(p), 0.0, 1.0);
 

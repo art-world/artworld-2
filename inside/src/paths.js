@@ -40,7 +40,25 @@ export const paths = {
     pos: [Math.sin(t * 0.03) * 1.2, 0.3, Math.cos(t * 0.03) * 1.2],
     fov: 74,
   }),
+
+  // Round the booth, facing it, close enough that it fills a vertical
+  // frame and the field bending round it shows. The one for the object.
+  call: (t) => {
+    const a = 0.4 + t * 0.14;
+    const r = 6.4 + Math.sin(t * 0.21) * 1.1;
+    const y = 0.4 + Math.sin(t * 0.09) * 1.3;
+    return {
+      yaw: a + Math.sin(t * 0.17) * 0.12,
+      pitch: Math.atan2(-y, r) + 0.08,
+      pos: [Math.sin(a) * r, y, Math.cos(a) * r],
+      fov: 58,
+    };
+  },
 };
+
+// Every path is kept clear of the booth when it is played (see keepClear
+// in main.js), so the older ones that pass through the middle of the world
+// swing round it rather than through it.
 
 export const pathNames = Object.keys(paths);
 

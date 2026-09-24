@@ -1,0 +1,686 @@
+// The booth. The one object in this world with a surface of its own.
+//
+// It is a scan of a real kiosk, litter and all, and it is treated two ways
+// at once: the scan as it came, crunched, and liquid chrome that reflects
+// the field it is standing in. A front runs across it between the two, so
+// the cheap object and the expensive one are the same thing at different
+// moments. The field bends round it. It rings until someone answers it.
+//
+// Every displacement is a function of position and time only, never of a
+// normal, so the scan's split vertices move together and the mesh bends
+// without tearing along its UV seams. The tearing that does happen is put
+// there on purpose, in slabs.
+
+import * as THREE from 'three';
+import { UNIFORMS, HELPERS, fieldBody } from './shaders.js';
+
+const NOISE3 = /* glsl */ `
+float h3(vec3 p){
+  p = fract(p * 0.3183099 + 0.1);
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float noise3(vec3 x){
+  vec3 i = floor(x), f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(h3(i), h3(i + vec3(1.0, 0.0, 0.0)), f.x),
+                 mix(h3(i + vec3(0.0, 1.0, 0.0)), h3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+             mix(mix(h3(i + vec3(0.0, 0.0, 1.0)), h3(i + vec3(1.0, 0.0, 1.0)), f.x),
+                 mix(h3(i + vec3(0.0, 1.0, 1.0)), h3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
+}
+`;
+
+const BOOTH_UNIFORMS = /* glsl */ `
+uniform float uChrome;   // how much of it is mirror, 0..1
+uniform float uWarp;     // how far it bends
+uniform float uMelt;     // how far it runs and pools
+uniform float uGlitch;   // how often slabs of it jump
+uniform float uSlice;    // how much of it is drawn in lines
+uniform float uFacet;    // smooth liquid, or the scan's own facets
+uniform float uCrunch;   // how coarse the scan's texture is sampled
+uniform float uRing;     // the ring, while nobody has answered
+uniform float uConnect;  // a call going through, 1 falling to 0
+uniform float uBoothSeed;
+uniform float uLag;      // ghosts run behind the booth in time
+uniform float uEchoShift;
+uniform float uGhost;
+uniform float uPointSize;
+uniform float uAge;
+uniform float uPulseSeed;
+uniform sampler2D uMap;
+uniform sampler2D uSign;
+uniform float uSignOn;
+uniform vec4  uSignRect;
+`;
+
+// The shape, in the booth's own space: one unit tall, centred on the
+// origin. Shared by the booth, its ghosts and its transmissions.
+const DEFORM = /* glsl */ `
+vec3 deform(vec3 p, float t){
+  float y = p.y + 0.5;
+
+  // Breathing. Three channels of slow noise, so it swells and sags like
+  // something liquid holding a shape it would rather not.
+  vec3 q = p * 2.4 + vec3(0.0, -t * 0.18, t * 0.05);
+  vec3 n = vec3(noise3(q), noise3(q + 19.1), noise3(q + 41.7)) - 0.5;
+  p += n * (0.02 + uWarp * 0.09 + uBass * 0.05);
+
+  // Twist, wound and unwound, more at the top than the foot.
+  p.xz = rot((y - 0.5) * sin(t * 0.17) * 1.3 * uWarp + sin(t * 0.09) * 0.25 * uWarp) * p.xz;
+
+  // Melt. It runs down in columns and pools at the foot, the way a candle
+  // goes, and draws itself back up again.
+  float col = noise3(vec3(p.xz * 11.0, uBoothSeed));
+  float drip = smoothstep(0.55, 0.95, col) * uMelt;
+  p.y -= drip * (1.0 - y) * 0.3 * (0.65 + 0.35 * sin(t * 0.3 + col * 6.0));
+  float pool = smoothstep(0.32, 0.0, y) * uMelt;
+  p.xz *= 1.0 + pool * (0.55 + 0.2 * sin(t * 0.4));
+  p.y = mix(p.y, -0.5, pool * 0.35);
+
+  // Slabs. Stepped in time, so they jump rather than slide, and the
+  // triangles across each cut stretch into a smear. A call going through
+  // throws every one of them.
+  float st = floor(t * 12.0);
+  float slab = floor(y * 22.0 + hash11(st) * 4.0);
+  float g = hash11(slab * 3.7 + st * 1.31 + uBoothSeed);
+  vec2 shove = vec2(hash11(slab + st * 7.1), hash11(slab * 1.9 + st * 3.3)) - 0.5;
+  p.xz += shove * step(g, uGlitch * 0.35) * 0.3;
+  vec2 fling = vec2(hash11(slab * 5.3 + 1.7), hash11(slab * 8.9 + 4.1)) - 0.5;
+  p.xz += fling * uConnect * 1.2;
+  p.y += (hash11(slab * 2.1) - 0.5) * uConnect * 0.25;
+
+  // The ring. A shudder too fast to follow, only while it rings.
+  p.xz += vec2(sin(t * 97.0), cos(t * 83.0)) * 0.011 * uRing;
+  p.y += sin(t * 61.0) * 0.004 * uRing;
+  return p;
+}
+`;
+
+const VERTEX = /* glsl */ `
+varying vec3 vWorld;
+varying vec3 vLocal;
+varying vec2 vUv;
+varying vec3 vNorm;
+varying vec3 vLocalN;
+
+void main(){
+  float t = uTime - uLag;
+  vec3 p = deform(position, t);
+  vLocal = position;
+  vUv = uv;
+  vNorm = normalize(mat3(modelMatrix) * normal);
+  vLocalN = normal;
+  vec4 world = modelMatrix * vec4(p, 1.0);
+  vWorld = world.xyz;
+  vec4 mv = viewMatrix * world;
+  // Ghosts only. Multipath: the same picture arriving twice, a moment
+  // late and shifted along the line.
+  mv.x += uEchoShift;
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+const SHARED_FRAG = /* glsl */ `
+varying vec3 vWorld;
+varying vec3 vLocal;
+varying vec2 vUv;
+varying vec3 vNorm;
+varying vec3 vLocalN;
+
+// The scan's own texture, sampled nearest and on a grid that coarsens, so
+// the real object always reads as a cheap copy of itself.
+// Where the sign is, in the sign's own 0..1, or outside it.
+vec2 signAt(){
+  vec2 s = (vLocal.xy - uSignRect.xy) / (uSignRect.zw - uSignRect.xy);
+  bool front = vLocalN.z > 0.5 && vLocal.z > 0.0;
+  return (front && s.x > 0.0 && s.x < 1.0 && s.y > 0.0 && s.y < 1.0) ? s : vec2(-1.0);
+}
+
+vec3 scanColour(){
+  float px = mix(1024.0, 72.0, uCrunch);
+  vec2 uv = (floor(vUv * px) + 0.5) / px;
+  vec3 c = texture2D(uMap, uv).rgb;
+
+  // The sign. When there is a connection to show, the kiosk names the
+  // visitor where it used to say what it was.
+  vec2 s = signAt();
+  if (uSignOn > 0.5 && s.x >= 0.0) c = texture2D(uSign, s).rgb;
+  return c;
+}
+
+float slabCut(){
+  float st = floor(uTime * 12.0);
+  float slab = floor((vLocal.y + 0.5) * 22.0 + hash11(st) * 4.0);
+  return hash11(slab * 9.1 + st * 0.7 + uBoothSeed);
+}
+`;
+
+// The booth itself. The field is evaluated along the reflected ray, so the
+// chrome shows the same world the viewer is standing in, from where they
+// are standing. No cube camera, no environment map: the world is a
+// function, so the reflection is exact.
+function boothFragment(name){
+  return UNIFORMS + BOOTH_UNIFORMS + HELPERS + fieldBody(name) + SHARED_FRAG + /* glsl */ `
+void main(){
+  // Drawn in lines, like a picture coming down a wire, more of them
+  // missing the harder it is pushed.
+  float lines = uSlice + uRing * 0.18 + uConnect * 0.5;
+  if (lines > 0.001 && fract(vLocal.y * 95.0 - uTime * 0.6) < lines * 0.7) discard;
+  if (slabCut() < uGlitch * 0.06 + uConnect * 0.3) discard;
+
+  vec3 V = normalize(vWorld - cameraPosition);
+  vec3 fn = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+  if (dot(fn, V) > 0.0) fn = -fn;
+  vec3 sn = normalize(vNorm);
+  if (dot(sn, V) > 0.0) sn = -sn;
+  vec3 N = normalize(mix(sn, fn, uFacet));
+
+  // Ripple, slow and broad, so the smooth version reads as liquid rather
+  // than as plastic.
+  vec2 rp = vLocal.xy * 6.0 + vec2(vLocal.z * 5.0, -uTime * 0.3);
+  N = normalize(N + vec3(noise(rp) - 0.5, noise(rp + 7.3) - 0.5, noise(rp + 3.1) - 0.5) * (0.04 + uWarp * 0.14));
+
+  vec3 R = reflect(V, N);
+  vec2 fp = mapDir(flowDir(R));
+  float env = clamp(field(fp), 0.0, 1.0);
+
+  float facing = clamp(dot(-V, N), 0.0, 1.0);
+  float fres = pow(1.0 - facing, 4.0);
+
+  // The horizon, the line every chrome object carries, running like
+  // liquid rather than sitting level.
+  float hz = R.y + (noise(fp * 2.0 + uTime * 0.1) - 0.5) * 0.14;
+  float sky = smoothstep(-0.02, 0.02, hz);
+  // Strip lights. Long softboxes, reflected as hard bars: the tell of a
+  // product shot, on a kiosk somebody left cans in.
+  float strip = (1.0 - smoothstep(0.0, 0.035, abs(R.y - 0.42)))
+              + (1.0 - smoothstep(0.0, 0.025, abs(R.x * 0.8 + R.z * 0.6 - 0.62))) * step(-0.1, R.y) * 0.8;
+  float chrome = mix(0.01 + env * 0.3, 0.5 + env * 0.7, sky) + strip * 1.3 + fres * 0.5;
+
+  vec3 tex = scanColour();
+  float lum = dot(tex, vec3(0.2126, 0.7152, 0.0722));
+  float sat = max(tex.r, max(tex.g, tex.b)) - min(tex.r, min(tex.g, tex.b));
+
+  // The kiosk's markings survive the chrome: the sign as a print under
+  // the lacquer, the tags etched into it.
+  chrome *= (0.55 + 0.6 * lum) * (1.0 - smoothstep(0.12, 0.38, sat) * 0.7);
+
+  // The scan, lit by the field it is in rather than by anything else.
+  float scan = lum * (0.45 + env * 0.9) + fres * 0.3;
+
+  // The front between the two. Attached to the object, not the screen, so
+  // it washes over the kiosk as it turns. Its edge runs hot.
+  float m = noise(vLocal.xy * 3.1 + vec2(vLocal.z * 2.3, -uTime * 0.07)) * 0.6
+          + noise(vLocal.zy * 7.3 + uTime * 0.11) * 0.4;
+  float th = mix(0.86, 0.14, uChrome);
+  float mask = smoothstep(th - 0.02, th + 0.02, m);
+  float edge = 1.0 - smoothstep(0.0, 0.018 + uLevel * 0.02, abs(m - th));
+
+  // The sign is never covered, and it is lit, as the real one is. The
+  // one thing on the kiosk that always says what it is, or who you are.
+  if (signAt().x >= 0.0){
+    mask = 0.0;
+    edge = 0.0;
+    scan = lum * 1.15;
+  }
+
+  float v = mix(scan, chrome, mask) + edge * (1.3 + uHit * 0.8);
+  v += uRing * (0.18 + 0.18 * sin(uTime * 40.0)) * (0.4 + fres);
+
+  gl_FragColor = vec4(vec3(max(v, 0.0) * uGain), 1.0);
+}
+`;
+}
+
+// The ghosts. The booth arriving twice more, late and to one side, the way
+// a signal does when it has taken more than one path. Cheap on purpose:
+// no field, just the outline and the scan.
+const GHOST_FRAG = UNIFORMS + BOOTH_UNIFORMS + HELPERS + SHARED_FRAG + /* glsl */ `
+void main(){
+  if (fract(vLocal.y * 120.0 + uTime * 3.0) < 0.5) discard;
+  vec3 V = normalize(vWorld - cameraPosition);
+  vec3 fn = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+  float fres = pow(1.0 - abs(dot(V, fn)), 2.0);
+  float lum = dot(scanColour(), vec3(0.2126, 0.7152, 0.0722));
+  float v = (lum * 0.45 + fres * 0.7) * uGhost * 0.3;
+  gl_FragColor = vec4(vec3(v), 1.0);
+}
+`;
+
+// Transmissions. The booth's own points, sent outward in slabs that leave
+// at different moments, fading as they go.
+const PULSE_VERT = /* glsl */ `
+varying float vFade;
+void main(){
+  vec3 p = deform(position, uTime);
+  float y = position.y + 0.5;
+  float slab = floor(y * 30.0);
+  float lag = hash11(slab * 3.1 + uPulseSeed) * 0.35;
+  float a = clamp((uAge - lag) / (1.0 - lag), 0.0, 1.0);
+  float e = 1.0 - pow(1.0 - a, 3.0);
+  p.xz *= 1.0 + e * (0.7 + hash11(slab + uPulseSeed * 1.7) * 1.6);
+  p.y += e * (hash11(slab * 7.7 + uPulseSeed) - 0.35) * 0.7;
+  p += (vec3(noise3(p * 6.0 + uPulseSeed), noise3(p * 6.0 + 11.0), noise3(p * 6.0 + 23.0)) - 0.5) * e * 0.35;
+  // Faded in over the first moment, or every point starts stacked on the
+  // surface it came from and the booth blows out to white.
+  vFade = smoothstep(0.0, 0.12, a) * (1.0 - a) * (1.0 - a);
+  gl_PointSize = uPointSize;
+  gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(p, 1.0);
+}
+`;
+
+const PULSE_FRAG = /* glsl */ `
+varying float vFade;
+void main(){
+  if (vFade < 0.003) discard;
+  gl_FragColor = vec4(vec3(vFade * 0.45), 1.0);
+}
+`;
+
+const vertexShader = UNIFORMS + BOOTH_UNIFORMS + HELPERS + NOISE3 + DEFORM + VERTEX;
+const pulseVertex = UNIFORMS + BOOTH_UNIFORMS + HELPERS + NOISE3 + DEFORM + PULSE_VERT;
+
+// The scan arrives as one mesh under a rotated, quantised node. Everything
+// is baked into plain floats in the booth's own space, one unit tall and
+// centred, so the shaders can reason about height without knowing where
+// the file came from. Replace the model and this still holds.
+function prepare(gltf){
+  let mesh = null;
+  gltf.scene.updateWorldMatrix(true, true);
+  gltf.scene.traverse((o) => { if (o.isMesh && !mesh) mesh = o; });
+  if (!mesh) throw new Error('booth model has no mesh');
+
+  const src = mesh.geometry;
+  const pos = src.attributes.position;
+  const out = new Float32Array(pos.count * 3);
+  const v = new THREE.Vector3();
+  const box = new THREE.Box3();
+  for (let i = 0; i < pos.count; i++){
+    v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+    v.toArray(out, i * 3);
+    box.expandByPoint(v);
+  }
+  const size = box.getSize(new THREE.Vector3());
+  const centre = box.getCenter(new THREE.Vector3());
+  const k = 1 / Math.max(size.y, 1e-6);
+  for (let i = 0; i < pos.count; i++){
+    out[i * 3]     = (out[i * 3]     - centre.x) * k;
+    out[i * 3 + 1] = (out[i * 3 + 1] - centre.y) * k;
+    out[i * 3 + 2] = (out[i * 3 + 2] - centre.z) * k;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(out, 3));
+  geometry.setAttribute('uv', src.attributes.uv);
+  geometry.setIndex(src.index);
+  geometry.setAttribute('normal', new THREE.BufferAttribute(weldedNormals(out, src.index), 3));
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+
+  const map = mesh.material.map;
+  if (map){
+    // Raw values, not linearised: nothing in this world is colour managed,
+    // the grade reads whatever lands in the target as display values.
+    map.colorSpace = THREE.NoColorSpace;
+    map.magFilter = THREE.NearestFilter;
+    map.minFilter = THREE.NearestMipmapNearestFilter;
+    map.needsUpdate = true;
+  }
+
+  return { geometry, map, extent: size.clone().multiplyScalar(k) };
+}
+
+// Smooth normals across the scan's seams. Its vertices are split wherever
+// the texture is, so a plain computeVertexNormals leaves every seam as a
+// visible crease in the chrome. Faces are accumulated per position instead.
+function weldedNormals(positions, index){
+  const n = positions.length / 3;
+  const ids = new Uint32Array(n);
+  const seen = new Map();
+  let count = 0;
+  for (let i = 0; i < n; i++){
+    const key = Math.round(positions[i * 3] * 2e4) + ',' +
+                Math.round(positions[i * 3 + 1] * 2e4) + ',' +
+                Math.round(positions[i * 3 + 2] * 2e4);
+    let id = seen.get(key);
+    if (id === undefined){ id = count++; seen.set(key, id); }
+    ids[i] = id;
+  }
+  const acc = new Float32Array(count * 3);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const idx = index ? index.array : null;
+  const tris = idx ? idx.length / 3 : n / 3;
+  for (let t = 0; t < tris; t++){
+    const i0 = idx ? idx[t * 3] : t * 3;
+    const i1 = idx ? idx[t * 3 + 1] : t * 3 + 1;
+    const i2 = idx ? idx[t * 3 + 2] : t * 3 + 2;
+    a.fromArray(positions, i0 * 3);
+    b.fromArray(positions, i1 * 3).sub(a);
+    c.fromArray(positions, i2 * 3).sub(a);
+    b.cross(c);   // area weighted
+    for (const i of [i0, i1, i2]){
+      const o = ids[i] * 3;
+      acc[o] += b.x; acc[o + 1] += b.y; acc[o + 2] += b.z;
+    }
+  }
+  // Then relaxed over their neighbours a few times. A scan is lumpy at
+  // every scale, and the raw normals make chrome look like crumpled foil.
+  // Relaxed, the big planes hold one long reflection, the way poured metal
+  // does, and the geometry underneath stays as lumpy as it was.
+  let cur = acc;
+  for (let pass = 0; pass < SMOOTHING; pass++){
+    const next = new Float32Array(count * 3);
+    for (let t = 0; t < tris; t++){
+      const a0 = ids[idx ? idx[t * 3] : t * 3] * 3;
+      const a1 = ids[idx ? idx[t * 3 + 1] : t * 3 + 1] * 3;
+      const a2 = ids[idx ? idx[t * 3 + 2] : t * 3 + 2] * 3;
+      for (let k = 0; k < 3; k++){
+        const sum = unit(cur, a0, k) + unit(cur, a1, k) + unit(cur, a2, k);
+        next[a0 + k] += sum; next[a1 + k] += sum; next[a2 + k] += sum;
+      }
+    }
+    cur = next;
+  }
+
+  const out = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++){
+    const o = ids[i] * 3;
+    const len = Math.hypot(cur[o], cur[o + 1], cur[o + 2]) || 1;
+    out[i * 3] = cur[o] / len;
+    out[i * 3 + 1] = cur[o + 1] / len;
+    out[i * 3 + 2] = cur[o + 2] / len;
+  }
+  return out;
+}
+
+const SMOOTHING = 4;
+
+function unit(v, o, k){
+  const len = Math.hypot(v[o], v[o + 1], v[o + 2]) || 1;
+  return v[o + k] / len;
+}
+
+// Every other point of the scan, for the transmissions. All of them is
+// far more than the eye can separate once they start to spread.
+function thinned(geometry, step){
+  const src = geometry.attributes.position.array;
+  const count = Math.floor(src.length / 3 / step);
+  const out = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++){
+    out[i * 3] = src[i * step * 3];
+    out[i * 3 + 1] = src[i * step * 3 + 1];
+    out[i * 3 + 2] = src[i * step * 3 + 2];
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(out, 3));
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 4);
+  return g;
+}
+
+// The phone's ring as a pattern of on and off, in seconds. Nothing is
+// heard: the booth shudders on the beats of it, and that is enough to know
+// what it is doing.
+function ringing(t, cadence){
+  const period = cadence.reduce((s, x) => s + x, 0);
+  let at = ((t % period) + period) % period;
+  for (let i = 0; i < cadence.length; i++){
+    if (at < cadence[i]) return i % 2 === 0;
+    at -= cadence[i];
+  }
+  return false;
+}
+
+// The connection, drawn as the kiosk would draw it: white on its black
+// band, in the only face this site has. Held on the GPU as pixels and in
+// nothing else.
+function signTexture(){
+  const canvas = document.createElement('canvas');
+  // The sign's own proportions, so the lettering is not stretched.
+  canvas.width = 560;
+  canvas.height = 104;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  return { canvas, texture };
+}
+
+export function createBooth(gltf, cfg, shared, shaderName, pixelRatio){
+  const { geometry, map, extent } = prepare(gltf);
+  const sign = signTexture();
+
+  const own = {
+    uChrome:    { value: 0.5 },
+    uWarp:      { value: 0.4 },
+    uMelt:      { value: 0.2 },
+    uGlitch:    { value: 0.1 },
+    uSlice:     { value: 0 },
+    uFacet:     { value: 0.4 },
+    uCrunch:    { value: 0.3 },
+    uRing:      { value: 0 },
+    uConnect:   { value: 0 },
+    uBoothSeed: { value: 3.7 },
+    uGhost:     { value: 0 },
+    uMap:       { value: map },
+    uSign:      { value: sign.texture },
+    uSignOn:    { value: 0 },
+    uSignRect:  { value: new THREE.Vector4(...cfg.sign) },
+    uPointSize: { value: cfg.pointSize * pixelRatio },
+  };
+
+  // Per draw: which ghost this is, how late and how far along the line.
+  const perDraw = (extra) => Object.assign({}, shared, own, {
+    uLag: { value: 0 }, uEchoShift: { value: 0 }, uAge: { value: 0 }, uPulseSeed: { value: 0 },
+  }, extra);
+
+  const group = new THREE.Group();
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: perDraw(),
+    vertexShader,
+    fragmentShader: boothFragment(shaderName),
+    side: THREE.DoubleSide,
+  });
+  const body = new THREE.Mesh(geometry, material);
+  // Drawn before the field, so the field's pixels behind it fail the depth
+  // test and are never evaluated. The field is the expensive part.
+  body.renderOrder = -1;
+  body.frustumCulled = false;
+  group.add(body);
+
+  const ghosts = [];
+  for (let i = 0; i < cfg.ghosts; i++){
+    const g = new THREE.Mesh(geometry, new THREE.ShaderMaterial({
+      uniforms: perDraw({ uLag: { value: 0.12 * (i + 1) } }),
+      vertexShader,
+      fragmentShader: GHOST_FRAG,
+      side: THREE.DoubleSide,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthTest: false,
+      depthWrite: false,
+    }));
+    g.renderOrder = 2;
+    g.frustumCulled = false;
+    ghosts.push(g);
+    group.add(g);
+  }
+
+  const points = thinned(geometry, 2);
+  const pulses = [];
+  for (let i = 0; i < cfg.pulses; i++){
+    const p = new THREE.Points(points, new THREE.ShaderMaterial({
+      uniforms: perDraw(),
+      vertexShader: pulseVertex,
+      fragmentShader: PULSE_FRAG,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }));
+    p.renderOrder = 3;
+    p.frustumCulled = false;
+    p.visible = false;
+    pulses.push({ points: p, born: -1, seed: 0 });
+    group.add(p);
+  }
+
+  // Current look and the one it is heading for. Changing track moves the
+  // target; the booth gets there over a second or two, under the cover of
+  // the call going through.
+  const look = Object.assign({}, cfg.look);
+  let target = Object.assign({}, cfg.look);
+  function setLook(next){ target = Object.assign({}, cfg.look, next || {}); }
+
+  let last = 0;
+  let connectAt = -99;
+  let ringLevel = 0;
+  let wasOn = false;
+  let lastPulse = -99;
+  let pulseCount = 0;
+
+  function pulse(time){
+    // The oldest one is reused. There are never so many that it shows.
+    let slot = pulses[0];
+    for (const p of pulses) if (p.born < slot.born) slot = p;
+    slot.born = time;
+    slot.seed = (pulseCount++ * 7.31) % 97;
+    slot.points.visible = true;
+    lastPulse = time;
+  }
+
+  function connect(){
+    connectAt = last;
+    pulse(last);
+  }
+
+  const toBooth = new THREE.Vector3();
+
+  function update(time, audio, camera, state){
+    // Time can run backwards when a capture starts from zero. Anything in
+    // flight is dropped rather than left stuck.
+    if (time < last){
+      connectAt = -99;
+      lastPulse = -99;
+      for (const p of pulses){ p.born = -1; p.points.visible = false; }
+    }
+    last = time;
+
+    for (const key in target) look[key] += (target[key] - look[key]) * 0.03;
+
+    const height = cfg.height * look.size;
+    group.scale.setScalar(height);
+    group.position.set(0, Math.sin(time * 0.21) * cfg.bob, 0);
+    group.rotation.set(
+      Math.sin(time * 0.13) * cfg.lean,
+      time * cfg.spin,
+      Math.sin(time * 0.17) * cfg.lean * 0.7
+    );
+    group.updateMatrixWorld(true);
+
+    const on = state.ringing && ringing(time, cfg.ring);
+    ringLevel += ((on ? 1 : 0) - ringLevel) * 0.45;
+    if (on && !wasOn) pulse(time);
+    wasOn = on;
+
+    const connecting = Math.exp(-Math.max(0, time - connectAt) * 4.2);
+    const hit = audio.hit || 0;
+    if (!state.still && hit > cfg.pulseOn && time - lastPulse > cfg.pulseGap) pulse(time);
+
+    // The mirror comes and goes on a slow tide, pushed in on the low end.
+    const tide = Math.sin(time * 0.11) * 0.22 + Math.sin(time * 0.047 + 1.0) * 0.12;
+    own.uChrome.value = THREE.MathUtils.clamp(look.chrome + tide + (audio.bass || 0) * 0.12, 0, 1);
+    own.uWarp.value = look.warp;
+    own.uMelt.value = look.melt;
+    own.uGlitch.value = look.glitch + hit * 0.5;
+    own.uSlice.value = look.slice;
+    own.uFacet.value = look.facet;
+    own.uCrunch.value = look.crunch;
+    own.uRing.value = ringLevel;
+    own.uConnect.value = connecting;
+    own.uGhost.value = cfg.ghost + hit * 0.9 + ringLevel * 0.6 + connecting * 0.8;
+
+    for (let i = 0; i < ghosts.length; i++){
+      ghosts[i].material.uniforms.uEchoShift.value =
+        (i + 1) * height * 0.045 * (0.5 + own.uGhost.value);
+    }
+
+    for (const p of pulses){
+      if (p.born < 0) continue;
+      const age = (time - p.born) / cfg.pulseLife;
+      if (age >= 1){ p.born = -1; p.points.visible = false; continue; }
+      p.points.material.uniforms.uAge.value = age;
+      p.points.material.uniforms.uPulseSeed.value = p.seed;
+    }
+
+    // The field bends round it. Measured from wherever the viewer is, so
+    // the pull is strongest along the line of sight to it.
+    toBooth.copy(group.position).sub(camera.position);
+    const dist = Math.max(toBooth.length(), 1e-3);
+    shared.uLensDir.value.copy(toBooth).divideScalar(dist);
+    const halfWidth = Math.max(extent.x, extent.z) * 0.5 * height;
+    shared.uLensSize.value = Math.atan(halfWidth / dist);
+    shared.uLensMass.value = look.lens * (1 + hit * 0.25 + ringLevel * 0.35 + connecting * 1.1);
+    shared.uLensSwirl.value = look.swirl * Math.sin(time * 0.13) + connecting * 2.2;
+
+    return { ring: ringLevel, connect: connecting };
+  }
+
+  function setShader(name){
+    material.fragmentShader = boothFragment(name);
+    material.needsUpdate = true;
+  }
+
+  // How far out the booth reaches from its own axis, pooled foot included.
+  // The camera keeps outside this.
+  function reach(){
+    const h = cfg.height * look.size;
+    return Math.hypot(extent.x, extent.z) * 0.5 * h * (1 + look.melt * 0.6) + cfg.clearance;
+  }
+
+  // A ray against the booth's box, in its own space. The scan is one fused
+  // mesh with no parts to aim at, and the whole kiosk is the thing to touch.
+  const hitBox = new THREE.Box3().copy(geometry.boundingBox).expandByScalar(0.04);
+  const inverse = new THREE.Matrix4();
+  const local = new THREE.Ray();
+  function hit(ray){
+    inverse.copy(group.matrixWorld).invert();
+    local.copy(ray).applyMatrix4(inverse);
+    return local.intersectsBox(hitBox);
+  }
+
+  // Only ever called with what net.js read this visit. Drawn into a canvas
+  // that exists to feed the texture and nothing else. Not stored, not sent.
+  function setSign(connection){
+    const text = connection && connection.ip;
+    if (!text){ own.uSignOn.value = 0; return; }
+    // The face has to be there before anything is drawn in it, or the
+    // canvas quietly falls back to the system monospace.
+    const ready = document.fonts && document.fonts.load
+      ? document.fonts.load('96px VT323').catch(() => {})
+      : Promise.resolve();
+    ready.then(() => drawSign(text));
+  }
+
+  function drawSign(text){
+    const { canvas, texture } = sign;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    let size = 96;
+    ctx.font = `${size}px VT323, monospace`;
+    while (ctx.measureText(text).width > canvas.width * 0.92 && size > 12){
+      size -= 2;
+      ctx.font = `${size}px VT323, monospace`;
+    }
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 2);
+    texture.needsUpdate = true;
+    own.uSignOn.value = 1;
+  }
+
+  return { group, update, connect, setLook, setShader, setSign, reach, hit,
+           get y(){ return group.position.y; } };
+}

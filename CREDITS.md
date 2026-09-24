@@ -17,6 +17,26 @@ condition. Attribution above stands regardless of the exception.
 untouched download, kept for re-baking if a higher-detail pass is ever
 needed.
 
+## Kiosk scan
+
+`assets/models/kiosk.glb` is the phone kiosk in the inside world. Its source
+is `assets/Phone Booth/3DModel.glb`, uploaded to this repo on 2026-09-24.
+Where the scan came from and under what terms is not recorded yet. Fill this
+in before release; if it is not the artist's own capture it needs the same
+licence check as the booth above.
+
+Baked with the glTF-Transform and meshoptimizer libraries: normals dropped
+(the shader derives its own), vertices welded, simplified with borders
+unlocked to 29.1k triangles, texture 4096px JPEG down to 1024px WebP,
+quantised and meshopt compressed. 11.6MB down to 362K. The borders have to
+be unlocked because the scan's vertices are split along every UV seam, and
+`gltf-transform optimize --simplify` stalls at 141k triangles otherwise.
+The shader samples the texture nearest-neighbour, so the downsampling reads
+as crunch.
+
+The upload itself, `assets/Phone Booth/` (about 26MB with the advanced
+export), is not loaded by anything.
+
 ## Warehouse room
 
 "Warehouse FBX Model Free" by Nicholas-3D (https://sketchfab.com/Nicholas01)

@@ -83,6 +83,8 @@ To write: `world.js` (scene from config), `interactions.js` (raycast against
 ## Open items
 
 - Booth model is from Sketchfab. **Check the licence before commercial use.**
+- The kiosk scan in the inside world (`assets/models/kiosk.glb`) has no
+  recorded origin or licence. See CREDITS.md.
 - Compress it: Draco the geometry, KTX2 the textures. `DRACOLoader` is in the
   release 1 import map and never called, so nothing is currently compressed.
   Aggressive downsampling reads as deliberate crunch here.

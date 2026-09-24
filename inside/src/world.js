@@ -1,5 +1,6 @@
-// The world. Two things in it: a field that closes around the viewer, and
-// figures standing in it at every bearing and height.
+// The world. Three things in it: a field that closes around the viewer,
+// figures standing in it at every bearing and height, and the booth in the
+// middle of it all, which the field bends round.
 //
 // Nothing is lit. The field is its own light and the figures are shaded
 // from the same field, sampled along the direction they are seen from, so
@@ -8,7 +9,9 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { UNIFORMS, HELPERS, fieldBody, skyFragment, skyVertex } from './shaders.js';
+import { createBooth } from './booth.js';
 
 function load(loader, url){
   return new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
@@ -35,7 +38,9 @@ function normalise(root){
 // is injected: the field, so a body is shaded by the space it stands in,
 // and the erosion that opens holes through it.
 const FIGURE_FRAG = /* glsl */ `
-  vec3 dir = normalize(vWorld - cameraPosition);
+  // Lensed like the field behind them, so a body passing the booth is
+  // still reading the same values as the space it stands in.
+  vec3 dir = lens(normalize(vWorld - cameraPosition));
   vec2 p = mapDir(dir) + gazePush(dir);
 
   // The body's sampling drifts through the same flow as everything else,
@@ -178,9 +183,19 @@ export async function buildWorld(renderer, config, onProgress){
     manager.onLoad = () => onProgress(1);
   }
   const loader = new GLTFLoader(manager);
+  // The booth is meshopt compressed. The decoder is vendored like the rest.
+  loader.setMeshoptDecoder(MeshoptDecoder);
   const cfg = config.dancers;
 
-  const gltfs = await Promise.all(cfg.sources.map((s) => load(loader, s.model)));
+  // A booth that fails to load leaves the world as it was rather than
+  // leaving nothing at all.
+  const [boothGltf, ...gltfs] = await Promise.all([
+    load(loader, config.booth.model).catch((err) => {
+      console.warn(`booth model not available (${config.booth.model})`, err);
+      return null;
+    }),
+    ...cfg.sources.map((s) => load(loader, s.model)),
+  ]);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
@@ -206,6 +221,12 @@ export async function buildWorld(renderer, config, onProgress){
     uSeed:   { value: 0 },
     uDetail: { value: 0.4 },
     uOrigin: { value: new THREE.Vector2() },
+    // Set from the booth every frame. Zero mass until it exists, so the
+    // field is untouched if it never loads.
+    uLensDir:   { value: new THREE.Vector3(0, 0, -1) },
+    uLensSize:  { value: 0 },
+    uLensMass:  { value: 0 },
+    uLensSwirl: { value: 0 },
   };
 
   // --- the field that closes around the viewer -------------------------
@@ -224,6 +245,12 @@ export async function buildWorld(renderer, config, onProgress){
   );
   sky.frustumCulled = false;
   scene.add(sky);
+
+  // --- the booth ------------------------------------------------------
+  const booth = boothGltf
+    ? createBooth(boothGltf, config.booth, shared, first, renderer.getPixelRatio())
+    : null;
+  if (booth) scene.add(booth.group);
 
   // --- the figures -----------------------------------------------------
   const sources = [];
@@ -291,12 +318,16 @@ export async function buildWorld(renderer, config, onProgress){
   // What the current track wants the world to be like. Defaults are the
   // identity, so a track with no scene behaves as it did before.
   let scene2 = { figures: 1, scale: 1, detail: 0.4, spin: 1, shake: 1 };
-  function setScene(next){ scene2 = Object.assign({}, scene2, next || {}); }
+  function setScene(next){
+    scene2 = Object.assign({}, scene2, next || {});
+    if (booth) booth.setLook(next && next.booth);
+  }
 
   function setShader(name){
     sky.material.fragmentShader = skyFragment(name);
     sky.material.needsUpdate = true;
-    // The figures carry the field too, so they recompile with it.
+    // The booth reflects it and the figures carry it, so both recompile.
+    if (booth) booth.setShader(name);
     for (const s of sources){
       s.material.dispose();
       const next = figureMaterial(name, shared);
@@ -352,7 +383,11 @@ export async function buildWorld(renderer, config, onProgress){
     renderer.autoClear = previous;
   }
 
-  function update(time, audio, pointer, look){
+  // What the booth is doing this frame, for anything downstream that wants
+  // to move with it.
+  const quiet = { ring: 0, connect: 0 };
+
+  function update(time, audio, pointer, look, camera, state){
     const k = config.field.react;
     shared.uTime.value = time;
     shared.uLevel.value = audio.level * k;
@@ -365,11 +400,12 @@ export async function buildWorld(renderer, config, onProgress){
     shared.uReach.value = moved * v.reach;
     shared.uFlow.value = v.flow + audio.hit * v.flowHit + moved * v.flowReach;
     shared.uDetail.value = scene2.detail;
+    return booth && camera ? booth.update(time, audio, camera, state || {}) : quiet;
   }
 
   // Where in the field this visitor's world sits. Set once, from their
   // connection, and never stored anywhere.
   function setOrigin(x, y){ shared.uOrigin.value.set(x, y); }
 
-  return { scene, sky, setShader, setScene, setOrigin, update, renderFigures, shared };
+  return { scene, sky, booth, setShader, setScene, setOrigin, update, renderFigures, shared };
 }

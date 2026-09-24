@@ -67,6 +67,9 @@ function go(next){
   const track = config.tracks[current];
   world.setShader(track.shader);
   world.setScene(track.scene);
+  // Every change of track is a call placed, and the booth shows it going
+  // through.
+  if (world.booth) world.booth.connect();
   ui.setTrack(current, track);
   audio.select(current, { autoplay: audio.started });
   // The one after this, so changing track never waits on a cold fetch.
@@ -82,12 +85,20 @@ const look = { yaw: 0, pitch: 0, vYaw: 0, vPitch: 0 };
 const drag = { active: false, x: 0, y: 0, moved: 0 };
 let lastInput = -99;
 
+// A tap, as opposed to a drag, and whether the call had already been taken
+// when it started. Read before start() runs on the same press.
+const tap = { x: 0, y: 0, t: 0, answered: false };
+
 function onDown(e){
   drag.active = true;
   drag.x = e.clientX;
   drag.y = e.clientY;
   look.vYaw = 0;
   look.vPitch = 0;
+  tap.x = e.clientX;
+  tap.y = e.clientY;
+  tap.t = performance.now();
+  tap.answered = audio.started;
 }
 
 function onMove(e){
@@ -106,10 +117,37 @@ function onMove(e){
   lastInput = performance.now() / 1000;
 }
 
-function onUp(){ drag.active = false; }
+// The booth is the thing to touch. Nothing else in the world is.
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+function overBooth(x, y){
+  if (!world.booth) return false;
+  pointer.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  return world.booth.hit(raycaster.ray);
+}
+
+function onUp(e){
+  drag.active = false;
+  if (!e || e.type !== 'pointerup' || e.target !== canvas) return;
+  const still = Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 10;
+  const quick = performance.now() - tap.t < 450;
+  // Tapping the booth answers it if it is ringing, and places a call if it
+  // is not: the next track. The first tap of all is left to start(), or
+  // taking the first call would hang straight up on it.
+  if (!tap.answered || !still || !quick || !overBooth(e.clientX, e.clientY)) return;
+  if (audio.element.paused){ audio.toggle(); updateHint(); }
+  else go(current + 1);
+}
+
+function onHover(e){
+  if (drag.active || e.pointerType !== 'mouse' || e.target !== canvas) return;
+  canvas.style.cursor = overBooth(e.clientX, e.clientY) ? 'pointer' : '';
+}
 
 window.addEventListener('pointerdown', onDown);
 window.addEventListener('pointermove', onMove);
+window.addEventListener('pointermove', onHover);
 window.addEventListener('pointerup', onUp);
 window.addEventListener('pointercancel', onUp);
 
@@ -185,6 +223,21 @@ window.addEventListener('resize', resize);
 const clock = new THREE.Clock();
 let lastContext = '';
 
+// The camera never goes through the booth. Distance from its axis is
+// eased outward rather than clamped, so a path that would cross it swings
+// round it instead of stopping dead against it.
+function keepClear(pos){
+  if (!world.booth) return;
+  const c = world.booth.reach();
+  const r = Math.hypot(pos.x, pos.z);
+  if (r < 1e-4){ pos.x = c; return; }
+  const k = Math.sqrt(r * r + c * c) / r;
+  pos.x *= k;
+  pos.z *= k;
+}
+
+const wrapAngle = (a) => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+
 // Capture takes the loop over: the live one is driven by the clock, and a
 // clip has to be driven by the frame index instead or it is not repeatable.
 let capturing = false;
@@ -198,17 +251,18 @@ function renderFrame(t, shot){
   look.pitch = shot.pitch;
   camera.rotation.set(shot.pitch, shot.yaw, 0, 'YXZ');
   camera.position.set(shot.pos[0], shot.pos[1], shot.pos[2]);
+  keepClear(camera.position);
   if (camera.fov !== shot.fov){ camera.fov = shot.fov; camera.updateProjectionMatrix(); }
   world.sky.position.copy(camera.position);
   camera.getWorldDirection(forward);
 
-  world.update(t, STILL_AUDIO, { vel: 0 }, forward);
+  const booth = world.update(t, STILL_AUDIO, { vel: 0 }, forward, camera, { ringing: false, still: true });
 
   renderer.setRenderTarget(grade.target);
   renderer.clear();
   renderer.render(world.scene, camera);
   world.renderFigures(renderer, camera, t, STILL_AUDIO);
-  grade.render(t, STILL_AUDIO.level);
+  grade.render(t, STILL_AUDIO.level, booth.connect * 0.9);
 }
 
 const capture = {
@@ -246,7 +300,17 @@ function frame(){
   drag.moved *= 0.9;
 
   const idle = now - lastInput > v.idle && !stillPlease;
-  if (idle && tilt.yaw === null){
+  if (idle && tilt.yaw === null && world.booth){
+    // Back toward the booth, and off it again on a slow wander, from
+    // wherever the camera has got to.
+    const p = camera.position;
+    const dx = -p.x, dz = -p.z, dy = world.booth.y - p.y;
+    const w = v.pull.wander;
+    const yawTo = Math.atan2(-dx, -dz) + Math.sin(time * 0.043) * w + Math.sin(time * 0.017 + 2.0) * w * 0.6;
+    const pitchTo = Math.atan2(dy, Math.hypot(dx, dz)) + Math.sin(time * 0.07) * v.driftPitch;
+    look.yaw += wrapAngle(yawTo - look.yaw) * v.pull.ease;
+    look.pitch += (pitchTo - look.pitch) * v.pull.ease;
+  } else if (idle && tilt.yaw === null){
     look.yaw += v.driftYaw * 0.016;
     look.pitch += Math.sin(time * 0.07) * v.driftPitch * 0.016;
   }
@@ -269,11 +333,14 @@ function frame(){
     Math.sin(time * rate * 0.71 + 1.1) * pan.rise,
     Math.cos(time * rate * 0.83) * pan.radius + Math.cos(time * rate * 1.9) * pan.radius * 0.22
   );
+  keepClear(camera.position);
   world.sky.position.copy(camera.position);
 
   camera.getWorldDirection(forward);
   const reach = { vel: Math.min(1, drag.moved + levels.hit * 0.35) };
-  world.update(time, levels, reach, forward);
+  // It rings until the call is taken, and again whenever it is put down.
+  const ringing = !stillPlease && (!audio.started || audio.element.paused);
+  const booth = world.update(time, levels, reach, forward, camera, { ringing, still: stillPlease });
 
   const el = audio.element;
   if (ui.setPlayed) ui.setPlayed(el.duration ? el.currentTime / el.duration : 0);
@@ -283,7 +350,7 @@ function frame(){
   renderer.clear();
   renderer.render(world.scene, camera);
   world.renderFigures(renderer, camera, time, levels);
-  grade.render(time, levels.level);
+  grade.render(time, levels.level, booth.connect * (stillPlease ? 0.2 : 0.9));
 
   requestAnimationFrame(frame);
 }
@@ -296,6 +363,8 @@ readConnection().then((connection) => {
   if (seed) world.setOrigin(seed, seed * 0.61);
   const el = document.getElementById('readout');
   if (el) renderConnection(el, connection);
+  // And on the booth's sign, where it used to say what the booth was.
+  if (world.booth) world.booth.setSign(connection);
 }).catch(() => { /* no readout, no world offset, nothing broken */ });
 
 // Capture is part of the piece rather than a debug hook: every vertical
