@@ -1,7 +1,7 @@
 // The booth. The one object in this world with a surface of its own.
 //
 // It is a scan of a real kiosk, litter and all, and it is treated two ways
-// at once: the scan as it came, crunched, and liquid chrome that reflects
+// at once: the scan as it came, and liquid chrome that reflects
 // the field it is standing in. A front runs across it between the two, so
 // the cheap object and the expensive one are the same thing at different
 // moments. The field bends round it. It rings until someone answers it.
@@ -36,9 +36,6 @@ uniform float uChrome;   // how much of it is mirror, 0..1
 uniform float uWarp;     // how far it bends
 uniform float uMelt;     // how far it runs and pools
 uniform float uGlitch;   // how often slabs of it jump
-uniform float uSlice;    // how much of it is drawn in lines
-uniform float uFacet;    // smooth liquid, or the scan's own facets
-uniform float uCrunch;   // how coarse the scan's texture is sampled
 uniform float uRing;     // the ring, while nobody has answered
 uniform float uConnect;  // a call going through, 1 falling to 0
 uniform float uBoothSeed;
@@ -61,10 +58,11 @@ vec3 deform(vec3 p, float t){
   // something liquid holding a shape it would rather not.
   vec3 q = p * 2.4 + vec3(0.0, -t * 0.18, t * 0.05);
   vec3 n = vec3(noise3(q), noise3(q + 19.1), noise3(q + 41.7)) - 0.5;
-  p += n * (0.02 + uWarp * 0.09 + uBass * 0.05);
+  p += n * (0.02 + uWarp * 0.05 + uBass * 0.04);
 
-  // Twist, wound and unwound, more at the top than the foot.
-  p.xz = rot((y - 0.5) * sin(t * 0.17) * 1.3 * uWarp + sin(t * 0.09) * 0.25 * uWarp) * p.xz;
+  // A slight twist, wound and unwound, more at the top than the foot.
+  // Only just enough to keep the reflections moving.
+  p.xz = rot((y - 0.5) * sin(t * 0.17) * 0.2 * uWarp) * p.xz;
 
   // Melt. It runs down in columns and pools at the foot, the way a candle
   // goes, and draws itself back up again.
@@ -82,7 +80,7 @@ vec3 deform(vec3 p, float t){
   float slab = floor(y * 22.0 + hash11(st) * 4.0);
   float g = hash11(slab * 3.7 + st * 1.31 + uBoothSeed);
   vec2 shove = vec2(hash11(slab + st * 7.1), hash11(slab * 1.9 + st * 3.3)) - 0.5;
-  p.xz += shove * step(g, uGlitch * 0.35) * 0.3;
+  p.xz += shove * step(g, uGlitch * 0.1) * 0.3;
   vec2 fling = vec2(hash11(slab * 5.3 + 1.7), hash11(slab * 8.9 + 4.1)) - 0.5;
   p.xz += fling * uConnect * 1.2;
   p.y += (hash11(slab * 2.1) - 0.5) * uConnect * 0.25;
@@ -125,8 +123,6 @@ varying vec2 vUv;
 varying vec3 vNorm;
 varying vec3 vLocalN;
 
-// The scan's own texture, sampled nearest and on a grid that coarsens, so
-// the real object always reads as a cheap copy of itself.
 // Where the sign is, in the sign's own 0..1, or outside it.
 vec2 signAt(){
   vec2 s = (vLocal.xy - uSignRect.xy) / (uSignRect.zw - uSignRect.xy);
@@ -134,10 +130,9 @@ vec2 signAt(){
   return (front && s.x > 0.0 && s.x < 1.0 && s.y > 0.0 && s.y < 1.0) ? s : vec2(-1.0);
 }
 
+// The scan's own texture, as it was captured.
 vec3 scanColour(){
-  float px = mix(1024.0, 72.0, uCrunch);
-  vec2 uv = (floor(vUv * px) + 0.5) / px;
-  vec3 c = texture2D(uMap, uv).rgb;
+  vec3 c = texture2D(uMap, vUv).rgb;
 
   // The sign. When there is a connection to show, the kiosk names the
   // visitor where it used to say what it was.
@@ -160,18 +155,17 @@ float slabCut(){
 function boothFragment(name){
   return UNIFORMS + BOOTH_UNIFORMS + HELPERS + fieldBody(name) + SHARED_FRAG + /* glsl */ `
 void main(){
-  // Drawn in lines, like a picture coming down a wire, more of them
-  // missing the harder it is pushed.
-  float lines = uSlice + uRing * 0.18 + uConnect * 0.5;
+  // Drawn in lines, like a picture coming down a wire, only while a call
+  // is going through.
+  float lines = uConnect * 0.5;
   if (lines > 0.001 && fract(vLocal.y * 95.0 - uTime * 0.6) < lines * 0.7) discard;
   if (slabCut() < uGlitch * 0.06 + uConnect * 0.3) discard;
 
+  // Smooth normals only. The simplified scan is made of long thin
+  // triangles, and shading them flat drew every one as its own stripe.
   vec3 V = normalize(vWorld - cameraPosition);
-  vec3 fn = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
-  if (dot(fn, V) > 0.0) fn = -fn;
-  vec3 sn = normalize(vNorm);
-  if (dot(sn, V) > 0.0) sn = -sn;
-  vec3 N = normalize(mix(sn, fn, uFacet));
+  vec3 N = normalize(vNorm);
+  if (dot(N, V) > 0.0) N = -N;
 
   // Ripple, slow and broad, so the smooth version reads as liquid rather
   // than as plastic.
@@ -189,19 +183,15 @@ void main(){
   // liquid rather than sitting level.
   float hz = R.y + (noise(fp * 2.0 + uTime * 0.1) - 0.5) * 0.14;
   float sky = smoothstep(-0.02, 0.02, hz);
-  // Strip lights. Long softboxes, reflected as hard bars: the tell of a
-  // product shot, on a kiosk somebody left cans in.
-  float strip = (1.0 - smoothstep(0.0, 0.035, abs(R.y - 0.42)))
-              + (1.0 - smoothstep(0.0, 0.025, abs(R.x * 0.8 + R.z * 0.6 - 0.62))) * step(-0.1, R.y) * 0.8;
+  // A strip light. A long softbox, reflected as a hard bar: the tell of a
+  // product shot, on a kiosk somebody left cans in. Level only: an upright
+  // one broke into vertical streaks across the scan's lumps.
+  float strip = 1.0 - smoothstep(0.0, 0.035, abs(R.y - 0.42));
   float chrome = mix(0.01 + env * 0.3, 0.5 + env * 0.7, sky) + strip * 1.3 + fres * 0.5;
 
-  vec3 tex = scanColour();
-  float lum = dot(tex, vec3(0.2126, 0.7152, 0.0722));
-  float sat = max(tex.r, max(tex.g, tex.b)) - min(tex.r, min(tex.g, tex.b));
-
-  // The kiosk's markings survive the chrome: the sign as a print under
-  // the lacquer, the tags etched into it.
-  chrome *= (0.55 + 0.6 * lum) * (1.0 - smoothstep(0.12, 0.38, sat) * 0.7);
+  // The chrome is left clean. Printing the scan into it put the graffiti's
+  // drips and the photo's grain across the mirror as fine vertical lines.
+  float lum = dot(scanColour(), vec3(0.2126, 0.7152, 0.0722));
 
   // The scan, lit by the field it is in rather than by anything else.
   float scan = lum * (0.45 + env * 0.9) + fres * 0.3;
@@ -235,10 +225,8 @@ void main(){
 // no field, just the outline and the scan.
 const GHOST_FRAG = UNIFORMS + BOOTH_UNIFORMS + HELPERS + SHARED_FRAG + /* glsl */ `
 void main(){
-  if (fract(vLocal.y * 120.0 + uTime * 3.0) < 0.5) discard;
   vec3 V = normalize(vWorld - cameraPosition);
-  vec3 fn = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
-  float fres = pow(1.0 - abs(dot(V, fn)), 2.0);
+  float fres = pow(1.0 - abs(dot(V, normalize(vNorm))), 2.0);
   float lum = dot(scanColour(), vec3(0.2126, 0.7152, 0.0722));
   float v = (lum * 0.45 + fres * 0.7) * uGhost * 0.3;
   gl_FragColor = vec4(vec3(v), 1.0);
@@ -289,8 +277,10 @@ function prepare(gltf){
     // Raw values, not linearised: nothing in this world is colour managed,
     // the grade reads whatever lands in the target as display values.
     map.colorSpace = THREE.NoColorSpace;
-    map.magFilter = THREE.NearestFilter;
-    map.minFilter = THREE.NearestMipmapNearestFilter;
+    // Filtered, not nearest: sampled nearest, the scan shimmered into a
+    // fine grain as soon as it was any distance away.
+    map.magFilter = THREE.LinearFilter;
+    map.minFilter = THREE.LinearMipmapLinearFilter;
     map.needsUpdate = true;
   }
 
@@ -404,10 +394,7 @@ export function createBooth(gltf, cfg, shared, shaderName){
     uChrome:    { value: 0.5 },
     uWarp:      { value: 0.4 },
     uMelt:      { value: 0.2 },
-    uGlitch:    { value: 0.1 },
-    uSlice:     { value: 0 },
-    uFacet:     { value: 0.4 },
-    uCrunch:    { value: 0.3 },
+    uGlitch:    { value: 0 },
     uRing:      { value: 0 },
     uConnect:   { value: 0 },
     uBoothSeed: { value: 3.7 },
@@ -500,15 +487,15 @@ export function createBooth(gltf, cfg, shared, shaderName){
     own.uChrome.value = THREE.MathUtils.clamp(look.chrome + tide + (audio.bass || 0) * 0.12, 0, 1);
     own.uWarp.value = look.warp;
     own.uMelt.value = look.melt;
-    own.uGlitch.value = look.glitch + hit * 0.5;
-    own.uSlice.value = look.slice;
-    own.uFacet.value = look.facet;
-    own.uCrunch.value = look.crunch;
+    // Only the hardest hits make it jump, on top of what the track asks.
+    own.uGlitch.value = look.glitch + Math.max(0, hit - 0.6) * 0.3;
     own.uRing.value = ringLevel;
     own.uConnect.value = connecting;
-    own.uGhost.value = cfg.ghost + hit * 0.9 + ringLevel * 0.6 + connecting * 0.8;
+    own.uGhost.value = cfg.ghost + ringLevel * 0.2 + connecting * 0.8;
 
+    // Not drawn at all when there is nothing to show.
     for (let i = 0; i < ghosts.length; i++){
+      ghosts[i].visible = own.uGhost.value > 0.01;
       ghosts[i].material.uniforms.uEchoShift.value =
         (i + 1) * height * 0.045 * (0.5 + own.uGhost.value);
     }

@@ -20,34 +20,30 @@ export const config = {
     { title: '23', src: '../warehouse/assets/audio/23.m4a', shader: 'warp',
       scene: { figures: 0.5, scale: 1.4, detail: 0.15, pan: 0.6, spin: 0.4, shake: 0.5,
                // Mercury. Nearly all mirror, running and pooling.
-               booth: { chrome: 0.8, warp: 0.6, melt: 0.55, glitch: 0.03, facet: 0.05,
-                        crunch: 0.2, lens: 1.2, swirl: 0.6, size: 1.1 } } },
+               booth: { chrome: 0.8, warp: 0.6, melt: 0.55, lens: 1.2, swirl: 0.6, size: 1.1 } } },
     { title: '27', src: '../warehouse/assets/audio/27.m4a', shader: 'fracture',
       scene: { figures: 1.0, scale: 0.7, detail: 0.75, pan: 1.6, spin: 1.5, shake: 1.4,
-               // Shattered plate. Faceted, jumping, half of it missing.
-               booth: { chrome: 0.6, warp: 0.2, melt: 0, glitch: 0.55, slice: 0.15, facet: 1,
-                        crunch: 0.6, lens: 0.8, swirl: -0.9, size: 0.9 } } },
+               // Hard and bright, and the one that still jumps now and then.
+               booth: { chrome: 0.6, warp: 0.2, melt: 0, glitch: 0.05, lens: 0.8, swirl: -0.9,
+                        size: 0.9 } } },
     { title: '38', src: '../warehouse/assets/audio/38.m4a', shader: 'tunnel',
       scene: { figures: 0.35, scale: 2.1, detail: 0.3, pan: 0.35, spin: 0.2, shake: 0.2,
                // A monolith. Huge, still, and heavy enough to swallow the
                // tunnel's vanishing point.
-               booth: { chrome: 0.95, warp: 0.15, melt: 0.1, glitch: 0.04, slice: 0.05,
-                        facet: 0.3, crunch: 0.2, lens: 1.9, swirl: 1.3, size: 1.6 } } },
+               booth: { chrome: 0.95, warp: 0.15, melt: 0.1, lens: 1.9, swirl: 1.3, size: 1.6 } } },
     { title: '40', src: '../warehouse/assets/audio/40.m4a', shader: 'bodies',
       scene: { figures: 0.85, scale: 1.0, detail: 0.45, pan: 1.0, spin: 0.8, shake: 0.9,
                // Liquid, like the figures. Smooth and never still.
-               booth: { chrome: 0.7, warp: 0.95, melt: 0.35, glitch: 0.08, facet: 0,
-                        crunch: 0.1, lens: 1.0, swirl: 0.4, size: 1.0 } } },
+               booth: { chrome: 0.7, warp: 0.95, melt: 0.35, lens: 1.0, swirl: 0.4, size: 1.0 } } },
     { title: '41', src: '../warehouse/assets/audio/41.m4a', shader: 'strata',
       scene: { figures: 0.6, scale: 1.25, detail: 0.9, pan: 0.8, spin: 0.5, shake: 1.8,
-               // In lines, like the field. The scan showing through.
-               booth: { chrome: 0.4, warp: 0.3, melt: 0.1, glitch: 0.35, slice: 0.45, facet: 0.6,
-                        crunch: 0.5, lens: 0.9, swirl: 0.2, size: 1.2 } } },
+               // The scan showing through, jumping now and then with the field.
+               booth: { chrome: 0.4, warp: 0.3, melt: 0.1, glitch: 0.03, lens: 0.9, swirl: 0.2,
+                        size: 1.2 } } },
     { title: '42', src: '../warehouse/assets/audio/42.m4a', shader: 'swarm',
       scene: { figures: 1.0, scale: 0.85, detail: 0.6, pan: 1.3, spin: 1.1, shake: 0.7,
-               // Mostly the scan, crunched hard, throwing transmissions.
-               booth: { chrome: 0.25, warp: 0.45, melt: 0.2, glitch: 0.2, slice: 0.1, facet: 0.5,
-                        crunch: 0.85, lens: 1.1, swirl: -0.5, size: 0.95 } } },
+               // Mostly the scan, the kiosk as it was found.
+               booth: { chrome: 0.25, warp: 0.45, melt: 0.2, lens: 1.1, swirl: -0.5, size: 0.95 } } },
   ],
 
   field: {
@@ -74,20 +70,17 @@ export const config = {
     // is a British kiosk. Visual only.
     ring: [0.4, 0.2, 0.4, 2.0],
     ghosts: 2,       // multipath copies, late and to one side
-    ghost: 0.25,     // how visible they are with nothing happening
+    ghost: 0,        // how visible they are with nothing happening: not at
+                     // all. They show while it rings and as a call goes through.
     // Its state when a track says nothing. Tracks override any of these.
     //   chrome  how much of it is mirror rather than scan
     //   warp    how far it bends and breathes
     //   melt    how far it runs down and pools
-    //   glitch  how often slabs of it jump
-    //   slice   how much of it is drawn in lines
-    //   facet   the scan's own facets, 0 is smooth liquid
-    //   crunch  how coarse the scan's texture is
+    //   glitch  how often slabs of it jump, besides the hardest hits
     //   lens    how hard it bends the field round it
     //   swirl   how far it drags the field round with it
     //   size    against height above
-    look: { chrome: 0.5, warp: 0.4, melt: 0.2, glitch: 0.1, slice: 0, facet: 0.4,
-            crunch: 0.3, lens: 1.0, swirl: 0.3, size: 1.0 },
+    look: { chrome: 0.5, warp: 0.4, melt: 0.2, glitch: 0, lens: 1.0, swirl: 0.3, size: 1.0 },
   },
 
   dancers: {
