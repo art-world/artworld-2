@@ -11,12 +11,14 @@
 import { config } from './config.js';
 
 // --- the tour ------------------------------------------------------------
-// The scan is placed so the ground is at y = 0 and the underpass runs along
-// z through the origin, under a deck `length` long, between walls `width`
-// apart, with its underside `deck` high. Every move is laid out against
-// those numbers, so a re-placed or re-measured scan moves the tour with it.
-// Each move is a position and a direction over its own progress s, 0 to 1,
-// and u, its local seconds. The tour plays them in order with a crossfade.
+// The scan is placed with the ground at y = 0 and the bridge running along
+// z: the deck ends at the mouth, toward +z, and the corridor under it runs
+// back toward -z beside a row of posts. The scan is good from the mouth to
+// a few metres in and thins out beyond, so the camera stays in that part.
+// Every move is laid out against `place` in config, so a re-placed or
+// re-measured scan moves the tour with it. Each move is a position and a
+// direction over its own progress s, 0 to 1, and u, its local seconds. The
+// tour plays them in order with a crossfade.
 
 const P = config.place;
 const TAU = Math.PI * 2;
@@ -24,7 +26,7 @@ const lerp = (a, b, k) => a + (b - a) * k;
 const ease = (x) => { const c = Math.min(1, Math.max(0, x)); return c * c * (3 - 2 * c); };
 const wrap = (a) => a - TAU * Math.round(a / TAU);
 
-// Progress that slows in the middle, so a walk lingers under the deck
+// Progress that slows in the middle, so a move lingers where it is best
 // rather than hurrying through.
 function linger(s, amount){ return s + amount * Math.sin(TAU * s) / TAU; }
 
@@ -47,64 +49,62 @@ function blend(a, b, w){
 }
 
 const moves = {
-  // Through the underpass at eye height, from well outside one mouth to
-  // well outside the other, drifting from side to side. Near the end it
-  // turns to look back under the deck, always the same way round.
-  walk: (s, u, lap) => {
-    const k = linger(s, 0.35);
-    const z = lerp(-1.5, 1.5, k) * P.length;
-    const x = Math.sin(u * 0.2 + lap * 1.7) * P.width * 0.12;
-    const pos = [x, P.eye, z];
-    // Held to one side of the line all the way, never across it, or the
-    // turn back could go either way round and flip mid-turn.
-    const ahead = aim(pos, [x + 2 + Math.sin(u * 0.13 + lap) * 0.8, P.eye - 0.1, z + 6], 76);
-    const back = aim(pos, [0, P.deck * 0.45, 0], 68);
-    return blend(ahead, back, ease((s - 0.78) / 0.22));
+  // In through the mouth at eye height, drifting a little from side to
+  // side, looking into the corridor.
+  enter: (s, u, lap) => {
+    const z = lerp(P.mouth + 3.5, P.mouth - 5, linger(s, -0.2));
+    const x = P.lane + Math.sin(u * 0.23 + lap * 1.7) * 0.25;
+    return aim([x, P.eye, z], [x + Math.sin(u * 0.11 + lap) * 0.8, P.eye * 0.9, z - 6], 74);
   },
 
-  // From outside the far mouth, up past the edge of the deck until it is
-  // looking down on top of it.
-  rise: (s, u, lap) => {
-    const k = ease(s);
-    const pos = [Math.sin(lap * 2.3) * P.width * 0.15, lerp(P.eye, P.deck + 5, k), lerp(P.length * 0.5 + 2.5, P.length * 0.5 + 1, k)];
-    return aim(pos, [0, lerp(P.deck * 0.6, P.deck, k), lerp(0, P.length * 0.1, k)], 70);
-  },
-
-  // Out along the road and back, far enough that the bridge sits small in
-  // the field, landing just inside the mouth.
-  away: (s, u, lap) => {
-    // Out and back, easing at both ends rather than arriving at speed.
-    const out = 0.5 - 0.5 * Math.cos(TAU * s);
-    const z = lerp(P.length * 0.6, P.length * 0.35, s) + out * P.length * 1.6;
-    const y = lerp(P.deck + 4, P.eye, ease(s)) + out * P.deck * 0.4;
-    const x = Math.sin(u * 0.1 + lap) * P.width * 0.4;
-    return aim([x, y, z], [0, P.deck * 0.5, 0], 66);
-  },
-
-  // Standing under the middle of it, turning slowly all the way round:
-  // the walls, the underside of the deck, out of each mouth.
+  // Under the deck, turning slowly all the way round: the posts, the
+  // underside of the deck, the light at the mouth, the corridor again.
   turn: (s, u, lap) => {
-    const pos = [Math.sin(u * 0.05) * P.width * 0.1, P.eye, lerp(P.length * 0.25, -P.length * 0.1, ease(s))];
-    // Starting from where the walk back in left it looking, under the deck.
-    const a = s * TAU * 0.85;
-    const up = 0.15 + Math.sin(u * 0.21) * 0.35;
-    return aim(pos, [pos[0] - Math.sin(a) * 5, P.eye + up * 5, pos[2] - Math.cos(a) * 5], 80);
+    const pos = [P.lane + 0.3, P.eye * 0.9, lerp(P.mouth - 5, P.mouth - 6.5, ease(s))];
+    const a = s * TAU;
+    const up = 0.15 + Math.sin(u * 0.21 + lap) * 0.25;
+    return aim(pos, [pos[0] - Math.sin(a) * 4, pos[1] + up * 4, pos[2] - Math.cos(a) * 4], 78);
   },
 
-  // Close along one wall, reading it at an angle as it passes.
-  wall: (s, u, lap) => {
-    const side = lap % 2 ? -1 : 1;
-    const z = lerp(-P.length * 0.5, P.length * 0.5, ease(s));
-    const x = side * (P.width * 0.5 - 1.3);
-    return aim([x, P.eye * 0.9, z], [side * P.width * 0.5, P.eye * 0.85, z + 2.2], 70);
+  // Further in, slowly, then turning to look back at the mouth. Looking
+  // ahead is held to the posts' side of the line, so the turn back always
+  // goes the same way round.
+  deeper: (s, u, lap) => {
+    const z = lerp(P.mouth - 6.5, P.deep, linger(s, 0.3));
+    const pos = [P.lane, P.eye, z];
+    const ahead = aim(pos, [P.lane + 1.6, P.eye * 0.9, z - 6], 74);
+    const back = aim(pos, [P.lane, P.deck * 0.5, P.mouth + 2], 70);
+    return blend(ahead, back, ease((s - 0.6) / 0.4));
   },
 
-  // Low down near the ground, looking up at the underside of the deck,
-  // drifting back toward the mouth the walk starts from.
+  // Back out along the row of posts, close, reading them as they pass.
+  posts: (s, u, lap) => {
+    const z = lerp(P.deep + 0.5, P.mouth - 1.5, ease(s));
+    const x = P.posts - 0.45;
+    return aim([x, P.eye * 0.9, z], [P.posts + 0.4, P.eye * 0.75, z + 2.2], 70);
+  },
+
+  // Low to the ground at the mouth, looking up at the edge of the deck and
+  // the field over it.
   low: (s, u, lap) => {
     const k = ease(s);
-    const pos = [lerp(-0.3, 0.3, k) * P.width, 0.35, lerp(P.length * 0.3, -P.length * 0.9, k)];
-    return aim(pos, [pos[0] * 0.5, P.deck, pos[2] + 3], 84);
+    const z = lerp(P.mouth - 1.5, P.mouth + 1.5, k);
+    const pos = [lerp(P.posts - 0.45, P.lane, k), lerp(P.eye * 0.9, P.low, k), z];
+    return aim(pos, [pos[0] + 0.5, P.deck * 1.6, z + 3], 80);
+  },
+
+  // Out into the field, far enough that the bridge sits small in it, then
+  // turning to look back at it and coming in to the mouth. Looking ahead
+  // is held to one side, so the turn back always goes the same way round.
+  away: (s, u, lap) => {
+    const out = 0.5 - 0.5 * Math.cos(TAU * s);
+    const z = lerp(P.mouth + 1.5, P.mouth + 3.5, s) + out * 14;
+    const y = lerp(P.low, P.eye, ease(s)) + out * 2.5;
+    const x = P.lane + out * Math.sin(lap * 2.1 + 0.6) * 2;
+    const pos = [x, y, z];
+    const ahead = aim(pos, [x - 2, y + 0.6, z + 8], 70);
+    const back = aim(pos, [P.posts, P.deck * 0.5, P.mouth - 4], 66);
+    return blend(ahead, back, ease((s - 0.25) / 0.3));
   },
 };
 
@@ -112,12 +112,12 @@ const moves = {
 // one left off, facing about the same way, and the crossfade covers the
 // difference.
 const TOUR = [
-  { move: 'walk',  seconds: 26 },
-  { move: 'rise',  seconds: 14 },
-  { move: 'away',  seconds: 20 },
-  { move: 'turn',  seconds: 22 },
-  { move: 'wall',  seconds: 16 },
-  { move: 'low',   seconds: 14 },
+  { move: 'enter',  seconds: 16 },
+  { move: 'turn',   seconds: 24 },
+  { move: 'deeper', seconds: 14 },
+  { move: 'posts',  seconds: 16 },
+  { move: 'low',    seconds: 12 },
+  { move: 'away',   seconds: 24 },
 ];
 const BLEND = 4;     // seconds each move overlaps the next
 

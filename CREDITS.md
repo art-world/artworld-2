@@ -32,6 +32,30 @@ be unlocked because the scan's vertices are split along every UV seam, and
 The texture is filtered rather than sampled nearest: the camera goes up
 close to it and inside it, and nearest sampling shimmered into grain.
 
+## Underbridge scan
+
+`assets/splats/underbridge.compressed.ply` is the scan in the underbridge
+world, a Gaussian splat of the underside of a low bridge. Who captured it
+is not recorded here yet. It is baked from the upload,
+`assets/Underbridge_cleaned.ply`, with PlayCanvas's splat-transform (MIT),
+run offline and not shipped:
+
+    splat-transform Underbridge_cleaned.ply -S 0,0,0,45 -r 0,0,180 \
+      -t 0,-0.45,0 -r 0,17.6,0 -t 0.62,0,5.6 underbridge.compressed.ply
+
+- `-S 0,0,0,45` drops the 50,000 splats the capture put on a sphere 50
+  units out to stand in for the sky. Left in, they wall off the field.
+- `-r 0,0,180` turns it upright: the scan came in y-down.
+- `-t 0,-0.45,0` puts the ground at y = 0. splat-transform applies a
+  translation before the rotation written ahead of it, so after the flip a
+  negative value lifts.
+- `-r 0,17.6,0 -t 0.62,0,5.6` lines the bridge up along z, mouth toward
+  +z, with the clear lane under the deck near x = -1.2.
+
+13MB down to 2.9MB, 182,450 splats. A box crop and a filter on large
+splats were both tried and dropped: the underside of the deck is made of
+large, soft splats, and each took it out.
+
 ## Splat renderer
 
 `vendor/gaussian-splats-3d/` is GaussianSplats3D 0.4.7 by Mark Kellogg

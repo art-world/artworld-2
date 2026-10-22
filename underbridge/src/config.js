@@ -31,10 +31,10 @@ export const config = {
     react: 0.4,
   },
 
-  // The scan. A Gaussian splat, exported from SuperSplat as a compressed
-  // PLY. It is placed so the ground is at y = 0 and the underpass runs
-  // along z through the origin; the tour in paths.js is laid out in those
-  // terms, against `place` below.
+  // The scan. A Gaussian splat of the underside of a low bridge, baked by
+  // splat-transform from the upload (see CREDITS.md): upright, ground at
+  // y = 0, the bridge along z with its mouth toward +z, compressed. Placed
+  // as baked, so the transform here is left at nothing.
   scan: {
     model: '../assets/splats/underbridge.compressed.ply',
     position: [0, 0, 0],
@@ -45,12 +45,16 @@ export const config = {
     alphaCut: 5,
   },
 
-  // The underpass, in world units once the scan is placed.
+  // The bridge, measured in the baked scan. The tour is laid out against
+  // these, so the camera stays where the scan holds up.
   place: {
-    length: 10,      // along z, under the deck
-    width: 8,        // between the walls
-    deck: 4,         // height of the underside of the deck
-    eye: 1.6,
+    lane: -1.2,      // x of the clear line under the deck
+    posts: -0.6,     // x of the row of posts beside it
+    mouth: 7.5,      // z where the deck ends and the open ground begins
+    deep: -2.5,      // z past which the scan is too thin to go
+    deck: 1.15,      // height of the underside of the deck
+    eye: 0.65,
+    low: 0.2,
   },
 
   view: {
@@ -74,8 +78,8 @@ export const config = {
     flowHit: 0.22,
     flowReach: 0.4,
 
-    // The camera travels the tour in paths.js, through the underpass and
-    // round it. This is how fast, scaled by each track's own pan.
+    // The camera travels the tour in paths.js, in under the bridge and out
+    // again. This is how fast, scaled by each track's own pan.
     travel: 1,
   },
 

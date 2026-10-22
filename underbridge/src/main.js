@@ -231,8 +231,9 @@ const capture = {
   },
 };
 
-// The camera travels the tour in paths.js: through the underpass, round
-// it, along its walls, up over the deck and away. The same named moves a
+// The camera travels the tour in paths.js: in under the bridge, round,
+// deeper, back out along the posts, low at the mouth and away into the
+// field. The same named moves a
 // grab records, so the live site and a clip of it are one thing. Distance
 // along it is accumulated rather than read off the clock, so a track that
 // moves faster or slower changes the speed without jumping the camera.
