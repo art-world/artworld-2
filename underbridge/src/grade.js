@@ -1,6 +1,9 @@
 // Final pass. The scene renders to a target, then this draws it back as a
 // single fullscreen triangle: desaturate, crush, grain, vignette, scan.
-// Nothing reaches the canvas in colour.
+// Then the brightness that is left is read through the track's palette,
+// four colours from darkest to lightest. Whatever colour the scene had is
+// gone by then: every track is one light on one place, not the place's
+// own colours tinted.
 
 import * as THREE from 'three';
 
@@ -24,6 +27,10 @@ uniform float uGrain;
 uniform float uVignette;
 uniform float uScanline;
 uniform float uLevel;
+uniform vec3  uPal0;   // darkest
+uniform vec3  uPal1;   // shadow
+uniform vec3  uPal2;   // middle
+uniform vec3  uPal3;   // lightest
 
 varying vec2 vUv;
 
@@ -31,6 +38,14 @@ float hash(vec2 p){
   p = fract(p * vec2(443.897, 441.423));
   p += dot(p, p.yx + 19.19);
   return fract((p.x + p.y) * p.x);
+}
+
+// Brightness to colour, smoothly through the four stops.
+vec3 palette(float v){
+  v = clamp(v, 0.0, 1.0);
+  vec3 c = mix(uPal0, uPal1, smoothstep(0.0, 0.34, v));
+  c = mix(c, uPal2, smoothstep(0.34, 0.68, v));
+  return mix(c, uPal3, smoothstep(0.68, 1.0, v));
 }
 
 void main(){
@@ -53,7 +68,7 @@ void main(){
   float g = hash(vUv * uRes + fract(uTime) * 137.0) - 0.5;
   v += g * uGrain * (1.25 - v);
 
-  gl_FragColor = vec4(vec3(clamp(v, 0.0, 1.0)), 1.0);
+  gl_FragColor = vec4(palette(v), 1.0);
 }
 `;
 
@@ -79,7 +94,17 @@ export function createGrade(renderer, settings){
     uVignette: { value: settings.vignette },
     uScanline: { value: settings.scanline },
     uLevel:    { value: 0 },
+    uPal0:     { value: new THREE.Vector3(0, 0, 0) },
+    uPal1:     { value: new THREE.Vector3(0.33, 0.33, 0.33) },
+    uPal2:     { value: new THREE.Vector3(0.66, 0.66, 0.66) },
+    uPal3:     { value: new THREE.Vector3(1, 1, 1) },
   };
+  const stops = [uniforms.uPal0, uniforms.uPal1, uniforms.uPal2, uniforms.uPal3];
+
+  // Where the palette is heading. A change of track crossfades to the new
+  // one over a couple of seconds rather than cutting.
+  const towards = stops.map((u) => u.value.clone());
+  let last = 0;
 
   // One oversized triangle, no attributes beyond position and uv.
   const geometry = new THREE.BufferGeometry();
@@ -107,7 +132,21 @@ export function createGrade(renderer, settings){
       target.setSize(w * dpr, h * dpr);
       uniforms.uRes.value.set(w * dpr, h * dpr);
     },
+    // Four hex colours, darkest first. Read as written, not colour managed:
+    // nothing else in this pipeline is either.
+    setPalette(hexes, instant = false){
+      hexes.forEach((hex, i) => {
+        const n = parseInt(hex.replace('#', ''), 16);
+        towards[i].set(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+        if (instant) stops[i].value.copy(towards[i]);
+      });
+    },
     render(time, level){
+      // Time runs backwards when a capture starts from zero: arrive at once.
+      const dt = time - last;
+      last = time;
+      const k = dt < 0 ? 1 : 1 - Math.exp(-Math.min(dt, 0.1) / settings.paletteFade);
+      for (let i = 0; i < 4; i++) stops[i].value.lerp(towards[i], k);
       uniforms.uTime.value = time;
       uniforms.uLevel.value = level;
       renderer.setRenderTarget(null);

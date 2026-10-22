@@ -67,6 +67,7 @@ function go(next){
   const track = config.tracks[current];
   world.setShader(track.shader);
   world.setScene(track.scene);
+  grade.setPalette(track.palette);
   ui.setTrack(current, track);
   audio.select(current, { autoplay: audio.started });
   // The one after this, so changing track never waits on a cold fetch.
@@ -335,6 +336,7 @@ resize();
 ui.setTrack(current, config.tracks[current]);
 world.setShader(config.tracks[current].shader);
 world.setScene(config.tracks[current].scene);
+grade.setPalette(config.tracks[current].palette, true);
 audio.preload(current + 1);
 updateHint();
 ui.reveal();

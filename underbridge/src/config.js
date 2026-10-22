@@ -7,28 +7,47 @@ export const config = {
   //
   //   detail   extra high frequency laid over the field
   //   pan      how fast the camera travels the tour
+  //
+  // `palette` is the light the track is seen in: four colours the grade
+  // reads brightness through, darkest first. Kept dark at the bottom and
+  // muted in the middle, so the scan stays legible and nothing reads as a
+  // filter.
   tracks: [
     { title: '23', src: '../warehouse/assets/audio/23.m4a', shader: 'warp',
-      scene: { detail: 0.15, pan: 0.6 } },
+      scene: { detail: 0.08, pan: 0.6 },
+      // Sunset. Aubergine shadows, terracotta, apricot where the light is.
+      palette: ['#0d0912', '#3a1d2b', '#a65a45', '#f3d2a8'] },
     { title: '27', src: '../warehouse/assets/audio/27.m4a', shader: 'fracture',
-      scene: { detail: 0.75, pan: 1.6 } },
+      scene: { detail: 0.35, pan: 1.6 },
+      // A basement under a red bulb. Black, oxblood, a little coral.
+      palette: ['#050203', '#260708', '#7a1914', '#d9806a'] },
     { title: '38', src: '../warehouse/assets/audio/38.m4a', shader: 'tunnel',
-      scene: { detail: 0.3, pan: 0.35 } },
+      scene: { detail: 0.15, pan: 0.35 },
+      // London on the river at night. Ink and petrol blue, with the
+      // embankment lights gold on the water.
+      palette: ['#04070c', '#13283a', '#4d6b7a', '#e6c48a'] },
     { title: '40', src: '../warehouse/assets/audio/40.m4a', shader: 'bodies',
-      scene: { detail: 0.45, pan: 1.0 } },
+      scene: { detail: 0.22, pan: 1.0 },
+      // Blue hour. Navy into slate into cold silver.
+      palette: ['#070a12', '#1d2740', '#6a7896', '#dfe2ea'] },
     { title: '41', src: '../warehouse/assets/audio/41.m4a', shader: 'strata',
-      scene: { detail: 0.9, pan: 0.8 } },
+      scene: { detail: 0.45, pan: 0.8 },
+      // An estuary under cloud. Charcoal, moss grey, stone, bone.
+      palette: ['#0a0b0a', '#2a302c', '#7d8478', '#e8e4d6'] },
     { title: '42', src: '../warehouse/assets/audio/42.m4a', shader: 'swarm',
-      scene: { detail: 0.6, pan: 1.3 } },
+      scene: { detail: 0.3, pan: 1.3 },
+      // The last train home. Dusk violet, mauve, a rose-white haze.
+      palette: ['#08070d', '#25203a', '#7a6688', '#e6d6e0'] },
   ],
 
   field: {
-    // The field is a projector here too, allowed past white so it reads as
-    // light rather than as a surface.
-    gain: 1.05,
+    // Held down to half: here the field is the weather round the bridge,
+    // not the subject, and at full it shouted the scan down. It lands in
+    // the palette's shadows and middle rather than its lights.
+    gain: 0.5,
     // How far the audio moves the field. Low: the silent image is the
     // reference, and the music should be felt rather than redraw it.
-    react: 0.4,
+    react: 0.3,
   },
 
   // The scan. A Gaussian splat of the underside of a low bridge, baked by
@@ -74,9 +93,9 @@ export const config = {
     // How hard the field itself moves. Low: the field reads better close
     // to its own shape, and pushing it far turns the fields into something
     // else rather than animating them.
-    flow: 0.12,
-    flowHit: 0.22,
-    flowReach: 0.4,
+    flow: 0.08,
+    flowHit: 0.12,
+    flowReach: 0.3,
 
     // The camera travels the tour in paths.js, in under the bridge and out
     // again. This is how fast, scaled by each track's own pan.
@@ -95,6 +114,8 @@ export const config = {
   },
 
   grade: {
+    // Seconds for one palette to give way to the next.
+    paletteFade: 0.7,
     contrast: 1.24,
     lift: -0.015,
     grain: 0.055,
