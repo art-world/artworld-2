@@ -210,7 +210,7 @@ function renderFrame(t, shot){
   renderer.setRenderTarget(grade.target);
   renderer.clear();
   renderer.render(world.scene, camera);
-  grade.render(t, STILL_AUDIO.level);
+  grade.render(t, STILL_AUDIO.level, shot.yaw, shot.pitch);
 }
 
 const capture = {
@@ -307,7 +307,7 @@ function frame(){
   renderer.setRenderTarget(grade.target);
   renderer.clear();
   renderer.render(world.scene, camera);
-  grade.render(time, levels.level);
+  grade.render(time, levels.level, look.yaw, look.pitch);
 
   requestAnimationFrame(frame);
 }
