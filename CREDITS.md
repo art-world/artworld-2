@@ -32,6 +32,13 @@ be unlocked because the scan's vertices are split along every UV seam, and
 The texture is filtered rather than sampled nearest: the camera goes up
 close to it and inside it, and nearest sampling shimmered into grain.
 
+## Splat renderer
+
+`vendor/gaussian-splats-3d/` is GaussianSplats3D 0.4.7 by Mark Kellogg
+(https://github.com/mkkellogg/GaussianSplats3D). License: MIT. It draws the
+scan in the underbridge world, vendored like Three so the page depends on
+no one else's server. One patch, described in the README beside it.
+
 ## Warehouse room
 
 "Warehouse FBX Model Free" by Nicholas-3D (https://sketchfab.com/Nicholas01)
