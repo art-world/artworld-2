@@ -7,56 +7,24 @@ export const config = {
   //
   //   detail   extra high frequency laid over the field
   //   pan      how fast the camera travels the tour
-  //
-  // `palette` is the light the track is seen in: a shadow, five colours
-  // for the middle, and a light. The five are a line, each blending into
-  // the next, and several of them are on screen at once in large soft
-  // regions (see grade.js). The middle one of the five is the most common
-  // and the two ends are accents; the first leans to the top of the frame.
-  // Shadows stay near black and the five stay muted, so the scan stays
-  // legible and nothing reads as a filter.
   tracks: [
     { title: '23', src: '../warehouse/assets/audio/23.m4a', shader: 'warp',
-      scene: { detail: 0.08, pan: 0.6 },
-      // Sunset. Rose and tangerine, gold low down, violet and the blue
-      // above it.
-      palette: { shadow: '#0c0814', light: '#fbe6cf',
-                 inks: ['#2f4c86', '#6c4a8e', '#c2566c', '#df7a48', '#e8b25e'] } },
+      scene: { detail: 0.08, pan: 0.6 } },
     { title: '27', src: '../warehouse/assets/audio/27.m4a', shader: 'fracture',
-      scene: { detail: 0.35, pan: 1.6 },
-      // A basement rave under red bulbs. Red and crimson, wine, a little
-      // ember, and the smoke going violet where the light runs out.
-      palette: { shadow: '#060203', light: '#f0c4b4',
-                 inks: ['#3a2050', '#7a1a3a', '#a8221f', '#c2452a', '#cc6a3c'] } },
+      scene: { detail: 0.35, pan: 1.6 } },
     { title: '38', src: '../warehouse/assets/audio/38.m4a', shader: 'tunnel',
-      scene: { detail: 0.15, pan: 0.35 },
-      // London's skyline on the river at night. Petrol water, the cold
-      // white of the towers above, plum, and sodium amber on the surface.
-      palette: { shadow: '#03060b', light: '#f2ead8',
-                 inks: ['#9cc9d2', '#2f7c8a', '#1d4a66', '#5a2f5c', '#e0a24a'] } },
+      scene: { detail: 0.15, pan: 0.35 } },
     { title: '40', src: '../warehouse/assets/audio/40.m4a', shader: 'bodies',
-      scene: { detail: 0.22, pan: 1.0 },
-      // Blue hour. The last peach on the horizon, lilac, periwinkle, cobalt
-      // and the teal of the shadows.
-      palette: { shadow: '#060912', light: '#eef0f6',
-                 inks: ['#d9a28a', '#9b86b6', '#6c7ec0', '#2e4f98', '#3f7f92'] } },
+      scene: { detail: 0.22, pan: 1.0 } },
     { title: '41', src: '../warehouse/assets/audio/41.m4a', shader: 'strata',
-      scene: { detail: 0.45, pan: 0.8 },
-      // An estuary under cloud. Rust, ochre, sage, moss and slate water.
-      palette: { shadow: '#090b0a', light: '#efebe0',
-                 inks: ['#9c5c40', '#b89a5c', '#8a9c84', '#4f6448', '#5a6f86'] } },
+      scene: { detail: 0.45, pan: 0.8 } },
     { title: '42', src: '../warehouse/assets/audio/42.m4a', shader: 'swarm',
-      scene: { detail: 0.3, pan: 1.3 },
-      // The last train home. Platform amber, rose, mauve, violet and the teal
-      // of the carriage glass.
-      palette: { shadow: '#07060c', light: '#f1e6ee',
-                 inks: ['#d9a056', '#c8798a', '#9c6698', '#6a4aa0', '#3c7d86'] } },
+      scene: { detail: 0.3, pan: 1.3 } },
   ],
 
   field: {
     // Held down to half: here the field is the weather round the bridge,
-    // not the subject, and at full it shouted the scan down. It lands in
-    // the palette's shadows and middle rather than its lights.
+    // not the subject, and at full it shouted the scan down.
     gain: 0.5,
     // How far the audio moves the field. Low: the silent image is the
     // reference, and the music should be felt rather than redraw it.
@@ -127,8 +95,6 @@ export const config = {
   },
 
   grade: {
-    // Seconds for one palette to give way to the next.
-    paletteFade: 0.7,
     contrast: 1.24,
     lift: -0.015,
     grain: 0.055,
